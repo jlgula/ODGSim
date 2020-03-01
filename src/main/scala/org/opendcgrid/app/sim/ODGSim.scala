@@ -14,40 +14,28 @@ object Parameters {
 object ODGSim extends App {
   val input = ""
   val logTry = GridBuilder.build(input).map { g: Grid => g.run(g.configuredEvents) }
-
 }
 
 // Enumeration of port directions
 sealed trait Direction
-
 object Direction {
-
   case object Load extends Direction
-
   case object Source extends Direction
-
   case object Bidirectional extends Direction
-
 }
 
 case class Port(uuid: Int, name: String, direction: Direction = Direction.Load)
 
 sealed abstract class Event(val time: Time)
-
 case class QuitEvent(t: Time = Seconds(0)) extends Event(t)
-
 case class TickEvent(t: Time) extends Event(t)
 
 sealed abstract class LogItem(val time: Time)
-
 case class EventLogItem(event: Event) extends LogItem(event.time)
-
 case class UnderPowerLogItem(t: Time, device: String, expected: Power, assigned: Power) extends LogItem(t)
 
 sealed abstract class PowerMessage(val port: Port, val power: Power)
-
 case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
-
 case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
 class Grid(
