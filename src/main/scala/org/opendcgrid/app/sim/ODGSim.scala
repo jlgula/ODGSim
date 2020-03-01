@@ -62,7 +62,6 @@ class Grid(
     var timeOffset: Time = Seconds(0) // Time since start of run
     val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
-    //val portsDevices = Map[Port, Device](links.keys.map { port => (port, getDevice(port) )}.toSeq: _*)
     val deviceData = Map[Device, DeviceData](devices.toSeq.map { device => (device, device.createData()) }: _*)
 
     breakable {
@@ -107,7 +106,7 @@ class Grid(
         val devicesToProcess = devices.filter {
           deviceData(_).pendingMessages.nonEmpty
         }
-        println(s"devicesToProcess: $devicesToProcess")
+        //println(s"devicesToProcess: $devicesToProcess")
         if (devicesToProcess.isEmpty) break
         devicesToProcess.foreach {
           assignPowerAndProcessMessages(_, deviceData)
@@ -149,10 +148,7 @@ class DeviceData {
   val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]()
 
   // These are only valid during an allocation cycle.
-  //var remainingInternalProduction: Power = Watts(0)  // Initialized to production at start of cycle
   var assignedInternalConsumption: Power = Watts(0) // Initialized to 0 at start of cycle
-  //var pendingPowerDemand: Power = Watts(0)    // Initialized to consumption at start of cycle
-  //var pendingPowerGrant: Power = Watts(0) // Initialized to 0 at start of cycle.
   var totalPowerDemand: Power = Watts(0) // Initialized to 0 at start of cycle
   var totalPowerAvailable: Power = Watts(0) // Initialized to production  at start of cycle.
   val requestsPending: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]()
@@ -163,7 +159,6 @@ class DeviceData {
 class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0)) {
   // This is called once after each event to initialize the data for this device
   def initializePowerCycle(data: DeviceData, links: Map[Port, Port]): Unit = {
-    //data.remainingInternalProduction = data.internalProduction
     data.assignedInternalConsumption = Watts(0)
     data.totalPowerDemand = data.internalConsumption
     data.totalPowerAvailable = data.internalProduction
@@ -193,7 +188,7 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val inte
   // Reduce this by any remaining internal energy.
   // Distribute the remaining demand to source ports.
   def assignPower(data: DeviceData): Seq[PowerMessage] = {
-    println(s"assignPower ${this.deviceID} messages: ${data.pendingMessages}")
+    //println(s"assignPower ${this.deviceID} messages: ${data.pendingMessages}")
     val result: mutable.ArrayBuffer[PowerMessage] = mutable.ArrayBuffer[PowerMessage]()
 
     // First figure out how much power is needed from external sources if any and request that from available source ports or internal production.
@@ -207,14 +202,9 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val inte
 
     // Deal with internal consumption first
     val assignProductionToConsumption = data.totalPowerAvailable.min(data.internalConsumption - data.assignedInternalConsumption)
-    println(s"device: ${this.deviceID} assignProductionToConsumption: $assignProductionToConsumption")
+    //println(s"device: ${this.deviceID} assignProductionToConsumption: $assignProductionToConsumption")
     data.assignedInternalConsumption += assignProductionToConsumption
     data.totalPowerDemand -= assignProductionToConsumption
-    //data.remainingInternalProduction -= assignProductionToConsumption
-
-    //val assignGrantToConsumption = data.pendingPowerGrant.min(data.internalConsumption - data.assignedInternalConsumption)
-    //data.assignedInternalConsumption += assignGrantToConsumption
-    //data.remainingInternalProduction -= assignGrantToConsumption
 
     if (data.assignedInternalConsumption < data.internalConsumption) {
       // Try to get power from some source
@@ -232,28 +222,6 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val inte
         result ++= createDemandRequest(data)
       }
     }
-
-    /*
-    val externalPowerDemand = if (data.pendingMessages.isEmpty) Watts(0) else data.pendingMessages.filter(_.isInstanceOf[PowerRequest]).map(_.power).reduce((a, b) => a + b)
-    val totalPowerDemand = externalPowerDemand + data.internalConsumption
-    val internalPowerAllocated = Watts(Math.min(totalPowerDemand to Watts, data.internalProduction to Watts))
-    val residualPowerDemand = totalPowerDemand - internalPowerAllocated
-
-    // Then collect grants and either use internally or forward to requestees.
-    //data.remainingInternalEnergy -= internalEnergyAllocated
-    //data.pendingMessages.clear()
-    val loadPorts = filterPorts(data, Direction.Load)
-    val externalPowerGrant = if (data.pendingMessages.isEmpty) Watts(0) else data.pendingMessages.filter(_.isInstanceOf[PowerGrant]).map(_.power).reduce((a, b) => a + b)
-    if (residualEnergyDemand == WattHours(0)) Map()
-    else {
-      if (loadPorts.isEmpty) throw new IllegalStateException(s"${this} has $residualEnergyDemand Wh demand but no load ports")
-      else {
-        // TODO: allocate by droop curve. For now, equal demand on all ports
-        val demandPerPort = residualEnergyDemand / loadPorts.size
-        Map(loadPorts.map { port => (port, PowerRequest(demandPerPort)) }: _*)
-      }
-    }
-    */
     result
 
   }
@@ -272,7 +240,7 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val inte
 
 
   // Create the initial device data.
-  def createData(timeDelta: Time = Seconds(0)): DeviceData = {
+  def createData(): DeviceData = {
     val result = new DeviceData()
     result.internalConsumption = this.internalConsumption
     result.internalProduction = this.internalProduction
