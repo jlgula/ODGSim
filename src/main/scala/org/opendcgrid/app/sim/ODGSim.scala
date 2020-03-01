@@ -55,14 +55,13 @@ class Grid(
             val links: Map[Port, Port] = Map(),
             val configuredEvents: Seq[Event] = Seq()) {
 
-  val bidirectionalLinks = links ++ mutable.HashMap(links.toSeq.map { z: (Port, Port) => (z._2, z._1) }: _*)
+  private val bidirectionalLinks = links ++ mutable.HashMap(links.toSeq.map { z: (Port, Port) => (z._2, z._1) }: _*)
 
   def run(toDo: Seq[Event]): Seq[LogItem] = {
 
     var timeOffset: Time = Seconds(0) // Time since start of run
     val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
-    val deviceData = Map[Device, DeviceData](devices.toSeq.map { device => (device, device.createData()) }: _*)
 
     breakable {
       for (_ <- 0 until Parameters.maxEvents) {
@@ -77,12 +76,11 @@ class Grid(
         }
 
         log += EventLogItem(next)
-        assignPower(timeDelta, deviceData)
+        assignPower(timeDelta)
 
         // Log any device that does not receive its required power.
         for (device <- devices) {
-          val data = deviceData(device)
-          if (data.internalConsumption > data.assignedInternalConsumption) log += UnderPowerLogItem(timeOffset, device.deviceID, data.internalConsumption, data.assignedInternalConsumption)
+          if (device.internalConsumption > device.assignedInternalConsumption) log += UnderPowerLogItem(timeOffset, device.deviceID, device.internalConsumption, device.assignedInternalConsumption)
         }
       }
     }
@@ -90,36 +88,36 @@ class Grid(
     log
   }
 
-  def assignPower(timeDelta: Time, deviceData: Map[Device, DeviceData]): Unit = {
-    devices.foreach { device: Device => device.initializePowerCycle(deviceData(device), links) }
+  def assignPower(timeDelta: Time): Unit = {
+    devices.foreach { device: Device => device.initializePowerCycle(links) }
 
     breakable {
       // First process all devices with consumption. May generate request messages.
       devices.filter {
-        deviceData(_).internalConsumption > Watts(0)
+        _.internalConsumption > Watts(0)
       }.foreach {
-        assignPowerAndProcessMessages(_, deviceData)
+        assignPowerAndProcessMessages
       }
 
       // Now try to resolve all messages.
       for (_ <- 0 until Parameters.maxPowerIterations) {
         val devicesToProcess = devices.filter {
-          deviceData(_).pendingMessages.nonEmpty
+          _.pendingMessages.nonEmpty
         }
         //println(s"devicesToProcess: $devicesToProcess")
         if (devicesToProcess.isEmpty) break
         devicesToProcess.foreach {
-          assignPowerAndProcessMessages(_, deviceData)
+          assignPowerAndProcessMessages
         }
       }
     }
   }
 
-  def assignPowerAndProcessMessages(device: Device, deviceData: Map[Device, DeviceData]): Unit = {
-    val messages = device.assignPower(deviceData(device))
+  def assignPowerAndProcessMessages(device: Device): Unit = {
+    val messages = device.assignPower()
     for (message <- messages) {
       val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
-      deviceData(remoteDevice).pendingMessages += mapMessage(message, remotePort)
+      remoteDevice.pendingMessages += mapMessage(message, remotePort)
     }
   }
 
@@ -141,9 +139,9 @@ class Grid(
 }
 
 
-class DeviceData {
-  var internalConsumption: Power = Watts(0)
-  var internalProduction: Power = Watts(0)
+class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val initialInternalConsumption: Power = Watts(0), val initialInternalProduction: Power = Watts(0)) {
+  var internalConsumption: Power = initialInternalConsumption
+  var internalProduction: Power = initialInternalProduction
   val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
   val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]()
 
@@ -154,31 +152,36 @@ class DeviceData {
   val requestsPending: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]()
   val grantsPending: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]()
   val pendingMessages: mutable.Queue[PowerMessage] = mutable.Queue[PowerMessage]() // Power demands from other devices to be processed.
-}
 
-class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0)) {
+  // Set the initial value of all port directions. Bidirectional ports default to load.
+  ports.foreach { port => portDirections += ((port, if (port.direction == Direction.Bidirectional) Direction.Load else port.direction)) }
+
+  // Default power flow for every port is 0.
+  ports.foreach { port => powerFlow += ((port, Watts(0))) }
+
+
   // This is called once after each event to initialize the data for this device
-  def initializePowerCycle(data: DeviceData, links: Map[Port, Port]): Unit = {
-    data.assignedInternalConsumption = Watts(0)
-    data.totalPowerDemand = data.internalConsumption
-    data.totalPowerAvailable = data.internalProduction
-    data.requestsPending.clear()
-    data.grantsPending.clear()
+  def initializePowerCycle(links: Map[Port, Port]): Unit = {
+    assignedInternalConsumption = Watts(0)
+    totalPowerDemand = internalConsumption
+    totalPowerAvailable = internalProduction
+    requestsPending.clear()
+    grantsPending.clear()
 
     // Assign port directions and validate legal configuration.
     for (sourcePort <- links.keys.filter(ports.contains(_))) {
       sourcePort match {
-        case p: Port if p.direction == Direction.Source => data.portDirections += (p -> Direction.Source)
+        case p: Port if p.direction == Direction.Source => portDirections += (p -> Direction.Source)
         case p: Port if p.direction == Direction.Load => throw new IllegalStateException(s"port $p is not a source")
-        case p: Port if p.direction == Direction.Bidirectional => data.portDirections += (p -> Direction.Source)
+        case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Source)
       }
     }
 
     for (destinationPort <- links.values.filter(ports.contains(_))) {
       destinationPort match {
         case p: Port if p.direction == Direction.Source => throw new IllegalStateException(s"port $p is not a load")
-        case p: Port if p.direction == Direction.Load => data.portDirections += (p -> Direction.Load)
-        case p: Port if p.direction == Direction.Bidirectional => data.portDirections += (p -> Direction.Load)
+        case p: Port if p.direction == Direction.Load => portDirections += (p -> Direction.Load)
+        case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Load)
       }
     }
 
@@ -187,76 +190,61 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val inte
   // Drain any pending power demands and compute total energy demand as the sum of queued demands.
   // Reduce this by any remaining internal energy.
   // Distribute the remaining demand to source ports.
-  def assignPower(data: DeviceData): Seq[PowerMessage] = {
+  def assignPower(): Seq[PowerMessage] = {
     //println(s"assignPower ${this.deviceID} messages: ${data.pendingMessages}")
     val result: mutable.ArrayBuffer[PowerMessage] = mutable.ArrayBuffer[PowerMessage]()
 
     // First figure out how much power is needed from external sources if any and request that from available source ports or internal production.
-    val powerRequests = data.pendingMessages.dequeueAll(_.isInstanceOf[PowerRequest])
-    data.totalPowerDemand += powerRequests.map(_.power).fold(Watts(0))((a, b) => a + b)
-    powerRequests.foreach { r: PowerMessage => data.requestsPending += (r.port -> r.power) }
-    val powerGrants = data.pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
-    data.totalPowerAvailable += powerGrants.map(_.power).fold(Watts(0))((a, b) => a + b)
-    powerGrants.foreach { r: PowerMessage => data.grantsPending += (r.port -> r.power) }
-    assert(data.pendingMessages.isEmpty)
+    val powerRequests = pendingMessages.dequeueAll(_.isInstanceOf[PowerRequest])
+    totalPowerDemand += powerRequests.map(_.power).fold(Watts(0))((a, b) => a + b)
+    powerRequests.foreach { r: PowerMessage => requestsPending += (r.port -> r.power) }
+    val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
+    totalPowerAvailable += powerGrants.map(_.power).fold(Watts(0))((a, b) => a + b)
+    powerGrants.foreach { r: PowerMessage => grantsPending += (r.port -> r.power) }
+    assert(pendingMessages.isEmpty)
 
     // Deal with internal consumption first
-    val assignProductionToConsumption = data.totalPowerAvailable.min(data.internalConsumption - data.assignedInternalConsumption)
+    val assignProductionToConsumption = totalPowerAvailable.min(internalConsumption - assignedInternalConsumption)
     //println(s"device: ${this.deviceID} assignProductionToConsumption: $assignProductionToConsumption")
-    data.assignedInternalConsumption += assignProductionToConsumption
-    data.totalPowerDemand -= assignProductionToConsumption
+    assignedInternalConsumption += assignProductionToConsumption
+    totalPowerDemand -= assignProductionToConsumption
 
-    if (data.assignedInternalConsumption < data.internalConsumption) {
+    if (assignedInternalConsumption < internalConsumption) {
       // Try to get power from some source
-      result ++= createDemandRequest(data)
+      result ++= createDemandRequest()
     }
 
     // Now deal with remaining demands.
-    for ((port, power) <- data.requestsPending.toSeq) {
-      if (data.totalPowerAvailable >= power) {
+    for ((port, power) <- requestsPending.toSeq) {
+      if (totalPowerAvailable >= power) {
         val grant = PowerGrant(port, power)
         result += grant
-        data.totalPowerAvailable -= power
+        totalPowerAvailable -= power
       } else {
         // Try to get power from some source
-        result ++= createDemandRequest(data)
+        result ++= createDemandRequest()
       }
     }
     result
 
   }
 
-  def createDemandRequest(data: DeviceData): Seq[PowerMessage] = {
-    val allLoadPorts = data.portDirections.filter(p => p._2 == Direction.Load).keySet
-    val untappedLoadPorts = (allLoadPorts -- data.grantsPending.keys).toSeq
+  def createDemandRequest(): Seq[PowerMessage] = {
+    val allLoadPorts = portDirections.filter(p => p._2 == Direction.Load).keySet
+    val untappedLoadPorts = (allLoadPorts -- grantsPending.keys).toSeq
     if (untappedLoadPorts.nonEmpty) {
       val targetPort = untappedLoadPorts.head
-      val requestedPower = data.totalPowerDemand
-      data.grantsPending += (targetPort -> requestedPower)
+      val requestedPower = totalPowerDemand
+      grantsPending += (targetPort -> requestedPower)
       Seq(PowerRequest(targetPort, requestedPower))
     }
     else Seq()
   }
 
 
-  // Create the initial device data.
-  def createData(): DeviceData = {
-    val result = new DeviceData()
-    result.internalConsumption = this.internalConsumption
-    result.internalProduction = this.internalProduction
-
-    // Set the initial value of all port directions. Bidirectional ports default to load.
-    ports.foreach { port => result.portDirections += ((port, if (port.direction == Direction.Bidirectional) Direction.Load else port.direction)) }
-
-    // Default power flow for every port is 0.
-    ports.foreach { port => result.powerFlow += ((port, Watts(0))) }
-
-    result
-  }
-
   // Find the current value of all ports in a particular direction.
-  def filterPorts(data: DeviceData, direction: Direction): Seq[Port] = ports.filter {
-    data.portDirections(_) == direction
+  def filterPorts(direction: Direction): Seq[Port] = ports.filter {
+    portDirections(_) == direction
   }
 
   override def toString: String = s"Device($deviceID, $uuid)"

@@ -1,7 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Energy, Power, WattHours, Watts}
-import squants.time.{Seconds, Time}
+import squants.energy.Watts
 import Samples._
 
 class DeviceTest extends org.scalatest.FunSuite {
@@ -11,33 +10,21 @@ class DeviceTest extends org.scalatest.FunSuite {
     assert(device.deviceID == deviceName)
   }
 
-  test("createData") {
-    for (device <- allDevices) {
-      val data = device.createData()
-      assertResult(device.internalProduction)(data.internalProduction)
-      assertResult(device.internalConsumption)(data.internalConsumption)
-      assert(data.pendingMessages.isEmpty)
-      assertResult(device.ports.size)(data.portDirections.size)
-      assertResult(device.ports.size)(data.powerFlow.size)
-    }
-  }
 
   test("initializePowerCycle") {
     for (device <- allDevices) {
-      val data = emptyDevice.createData()
-      device.initializePowerCycle(data, Map[Port, Port]())
-      assert(data.pendingMessages.isEmpty)
-      assertResult(Watts(0))(data.assignedInternalConsumption)
-      assertResult(data.internalConsumption)(data.totalPowerDemand)
-      assertResult(device.internalProduction)(data.totalPowerAvailable)
-      assert(data.requestsPending.isEmpty)
-      assert(data.grantsPending.isEmpty)
+      device.initializePowerCycle(Map[Port, Port]())
+      assert(device.pendingMessages.isEmpty)
+      assertResult(Watts(0))(device.assignedInternalConsumption)
+      assertResult(device.internalConsumption)(device.totalPowerDemand)
+      assertResult(device.internalProduction)(device.totalPowerAvailable)
+      assert(device.requestsPending.isEmpty)
+      assert(device.grantsPending.isEmpty)
     }
   }
 
   test("assignPower") {
-    val emptyData = emptyDevice.createData()
-    val result1 = emptyDevice.assignPower(emptyData)
+    val result1 = emptyDevice.assignPower()
     assert(result1.isEmpty)
     /*
         // Test simple load
