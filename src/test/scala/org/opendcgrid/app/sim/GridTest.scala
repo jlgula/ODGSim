@@ -1,7 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Power, Watts}
-import squants.time.{Seconds, Time}
+import squants.time.{Seconds}
 import Samples._
 
 class GridTest extends org.scalatest.FunSuite {
@@ -38,13 +37,18 @@ class GridTest extends org.scalatest.FunSuite {
     )
   }
 
-  test("BasicLoadAndSource") {
-    val grid = new Grid(Set(loadDevice1, sourceDevice5), Map(sourcePort50 -> loadPort10))
+  test("BasicSourceAndLoad") {
     val event = QuitEvent()
-    val result = grid.run(Seq(event))
-    assert(result.size == 1)
-    assert(result.head == EventLogItem(event))
+    val result = grid2.run(Seq(event))
+  }
 
+
+  test("DaisyChain") {
+    val quitEvent = QuitEvent()
+    val tickEvent = TickEvent()
+    //val result = grid3.run(Seq(event))
+    //val result = grid3.run(Seq(tickEvent, QuitEvent(Seconds(1))), RunConfiguration(Some("DaisyChain"), true))
+    val result = grid3.run(Seq(tickEvent, QuitEvent(Seconds(1))))
   }
 
 }

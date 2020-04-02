@@ -19,24 +19,36 @@ object ODGSim extends App {
 // Enumeration of port directions
 sealed trait Direction
 object Direction {
+
   case object Load extends Direction
+
   case object Source extends Direction
+
   case object Bidirectional extends Direction
+
 }
 
 case class Port(uuid: Int, name: String, direction: Direction = Direction.Load)
 
 sealed abstract class Event(val time: Time)
+
 case class QuitEvent(t: Time = Seconds(0)) extends Event(t)
-case class TickEvent(t: Time) extends Event(t)
+
+case class TickEvent(t: Time = Seconds(0)) extends Event(t)
 
 sealed abstract class LogItem(val time: Time)
+
 case class EventLogItem(event: Event) extends LogItem(event.time)
+
 case class UnderPowerLogItem(t: Time, device: String, expected: Power, assigned: Power) extends LogItem(t)
 
 sealed abstract class PowerMessage(val port: Port, val power: Power)
+
 case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
+
 case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
+
+case class RunConfiguration(name: Option[String] = None, trace: Boolean = false)
 
 class Grid(
             val devices: Set[Device] = Set(),
@@ -45,11 +57,12 @@ class Grid(
 
   private val bidirectionalLinks = links ++ mutable.HashMap(links.toSeq.map { z: (Port, Port) => (z._2, z._1) }: _*)
 
-  def run(toDo: Seq[Event]): Seq[LogItem] = {
+  def run(toDo: Seq[Event], configuration: RunConfiguration = RunConfiguration()): Seq[LogItem] = {
 
     var timeOffset: Time = Seconds(0) // Time since start of run
     val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
+    configuration.name.foreach(println)
 
     breakable {
       for (_ <- 0 until Parameters.maxEvents) {
@@ -64,7 +77,7 @@ class Grid(
         }
 
         log += EventLogItem(next)
-        assignPower(timeDelta)
+        assignPower(timeOffset, configuration, timeDelta)
 
         // Log any device that does not receive its required power.
         for (device <- devices) {
@@ -76,7 +89,7 @@ class Grid(
     log
   }
 
-  def assignPower(timeDelta: Time): Unit = {
+  def assignPower(time: Time, configuration: RunConfiguration, timeDelta: Time): Unit = {
     devices.foreach { device: Device => device.initializePowerCycle(links) }
 
     breakable {
@@ -84,7 +97,7 @@ class Grid(
       devices.filter {
         _.internalConsumption > Watts(0)
       }.foreach {
-        assignPowerAndProcessMessages
+        assignPowerAndProcessMessages(time, configuration, _)
       }
 
       // Now try to resolve all messages.
@@ -92,21 +105,27 @@ class Grid(
         val devicesToProcess = devices.filter {
           _.pendingMessages.nonEmpty
         }
-        //println(s"devicesToProcess: $devicesToProcess")
+        //aprintln(s"devicesToProcess: $devicesToProcess")
         if (devicesToProcess.isEmpty) break
         devicesToProcess.foreach {
-          assignPowerAndProcessMessages
+          assignPowerAndProcessMessages(time, configuration, _)
         }
       }
     }
   }
 
-  def assignPowerAndProcessMessages(device: Device): Unit = {
+  def assignPowerAndProcessMessages(time: Time, configuration: RunConfiguration, device: Device): Unit = {
     val messages = device.assignPower()
     for (message <- messages) {
       val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
-      remoteDevice.pendingMessages += mapMessage(message, remotePort)
+      val mappedMessage = mapMessage(message, remotePort)
+      remoteDevice.pendingMessages += mappedMessage
+      if (configuration.trace) println(traceMessage(time, remoteDevice, mappedMessage))
     }
+  }
+
+  def traceMessage(time: Time, targetDevice: Device, message: PowerMessage): String = {
+    s"$time target: ${targetDevice.deviceID} message: $message"
   }
 
   def mapMessage(message: PowerMessage, targetPort: Port): PowerMessage = message match {

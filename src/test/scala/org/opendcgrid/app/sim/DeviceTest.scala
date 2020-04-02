@@ -24,7 +24,7 @@ class DeviceTest extends org.scalatest.FunSuite {
   }
 
   test("assignPower") {
-    val result1 = emptyDevice.assignPower()
+    val result1 = device0.assignPower()
     assert(result1.isEmpty)
     /*
         // Test simple load

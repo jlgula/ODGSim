@@ -2,8 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/modules/odgsim.iml" filepath="$PROJECT_DIR$/.idea/modules/odgsim.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/modules/odgsim-build.iml" filepath="$PROJECT_DIR$/.idea/modules/odgsim-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/ODGSim.iml" filepath="$PROJECT_DIR$/.idea/modules/ODGSim.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/ODGSim-build.iml" filepath="$PROJECT_DIR$/.idea/modules/ODGSim-build.iml" />
     </modules>
   </component>
 </project>
