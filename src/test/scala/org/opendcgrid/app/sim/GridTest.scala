@@ -1,54 +1,47 @@
 package org.opendcgrid.app.sim
 
-import squants.time.{Seconds}
+import squants.time.Seconds
 import Samples._
 
 class GridTest extends org.scalatest.FunSuite {
 
   test("EmptyGrid") {
     val grid = new Grid()
-    val result = grid.run(Seq())
-    assert(result.isEmpty)
+    val log = grid.run(Seq())
+    assert(log.isEmpty)
   }
 
-  test("EmptyGridWithQuit") {
+  test("EmptyGridWithTick") {
     val grid = new Grid()
-    val event = QuitEvent()
-    val result = grid.run(Seq(event))
-    assert(result.size == 1)
-    assert(result.head == EventLogItem(event))
+    val event = TickEvent(Seconds(1))
+    val log = grid.run(Seq(event))
+    assert(log.size == 1)
+    assert(log.head == EventLogItem(event))
   }
 
   test("SelfContainedDeviceWithEnoughPower") {
     val grid = new Grid(Set(device3))
-    val event = QuitEvent()
-    val result = grid.run(Seq(event))
-    assert(result.size == 1)
-    assert(result.head == EventLogItem(event))
+    val log = grid.run(Nil)
+    assert(log.isEmpty)
   }
 
   test("SelfContainedDeviceWithoutEnoughPower") {
     val grid = new Grid(Set(device4))
-    val event = QuitEvent()
-    val result = grid.run(Seq(event))
-    assert(result.size == 2)
-    assert(result.head == EventLogItem(event))
-    assert(result(1) == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption2, internalProduction1)
-    )
+    val log = grid.run(Nil)
+    assert(log.size == 1)
+    assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption2, internalProduction1))
   }
 
   test("BasicSourceAndLoad") {
-    val event = QuitEvent()
-    val result = grid2.run(Seq(event))
+    val log = grid2.run(Nil)
+    assert(log.isEmpty)
   }
 
 
   test("DaisyChain") {
-    val quitEvent = QuitEvent()
-    val tickEvent = TickEvent()
-    //val result = grid3.run(Seq(event))
-    //val result = grid3.run(Seq(tickEvent, QuitEvent(Seconds(1))), RunConfiguration(Some("DaisyChain"), true))
-    val result = grid3.run(Seq(tickEvent, QuitEvent(Seconds(1))))
+    val log = grid3.run(Nil)
+    //val log = grid3.run(Nil, RunConfiguration(Some("DaisyChain"), true))
+    assert(log.isEmpty)
   }
 
 }

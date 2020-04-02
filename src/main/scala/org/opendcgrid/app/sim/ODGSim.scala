@@ -32,7 +32,7 @@ case class Port(uuid: Int, name: String, direction: Direction = Direction.Load)
 
 sealed abstract class Event(val time: Time)
 
-case class QuitEvent(t: Time = Seconds(0)) extends Event(t)
+//case class QuitEvent(t: Time = Seconds(0)) extends Event(t)
 
 case class TickEvent(t: Time = Seconds(0)) extends Event(t)
 
@@ -62,6 +62,7 @@ class Grid(
     var timeOffset: Time = Seconds(0) // Time since start of run
     val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
+    var eventCount: Int = 0
 
     def assignPower(): Unit = {
       devices.foreach { device: Device => device.initializePowerCycle(links) }
@@ -86,6 +87,9 @@ class Grid(
           }
         }
       }
+
+      // Log any device that does not receive its required power.
+      devices.foreach(checkDevice)
     }
 
     def assignPowerAndProcessMessages(device: Device): Unit = {
@@ -102,31 +106,31 @@ class Grid(
       s"$timeOffset target: ${targetDevice.deviceID} message: $message"
     }
 
-
-    configuration.name.foreach(println)
-
-    breakable {
-      for (_ <- 0 until Parameters.maxEvents) {
-        if (events.isEmpty) break
-        val next = events.dequeue()
-        val timeDelta = next.time - timeOffset
-        timeOffset = next.time
-
-        next match {
-          case _: QuitEvent => events.clear()
-          case _: TickEvent => // just used to trigger power assignments
-        }
-
-        log += EventLogItem(next)
-        assignPower()
-
-        // Log any device that does not receive its required power.
-        for (device <- devices) {
-          if (device.internalConsumption > device.assignedInternalConsumption) log += UnderPowerLogItem(timeOffset, device.deviceID, device.internalConsumption, device.assignedInternalConsumption)
-        }
-      }
+    // Validate internal state of device, logging error conditions
+    def checkDevice(device: Device): Unit = {
+      if (device.internalConsumption > device.assignedInternalConsumption) log += UnderPowerLogItem(timeOffset, device.deviceID, device.internalConsumption, device.assignedInternalConsumption)
     }
 
+
+    configuration.name.foreach(println) // Use for tracing particular tests
+
+    // Run through the power loop once to deal with static conditions.
+    assignPower()
+
+    while (events.nonEmpty) {
+      val next = events.dequeue()
+      eventCount += 1
+      if (eventCount >= Parameters.maxEvents) fatal("Event count overflow")
+      timeOffset = next.time
+      next match {
+        //case _: QuitEvent => events.clear()
+        case _: TickEvent => // just used to trigger power assignments
+      }
+
+      log += EventLogItem(next)
+      assignPower()
+
+    }
 
     log
   }
