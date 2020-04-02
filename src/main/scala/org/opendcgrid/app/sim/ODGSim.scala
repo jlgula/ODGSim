@@ -62,6 +62,47 @@ class Grid(
     var timeOffset: Time = Seconds(0) // Time since start of run
     val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
+
+    def assignPower(): Unit = {
+      devices.foreach { device: Device => device.initializePowerCycle(links) }
+
+      breakable {
+        // First process all devices with consumption. May generate request messages.
+        devices.filter {
+          _.internalConsumption > Watts(0)
+        }.foreach {
+          assignPowerAndProcessMessages
+        }
+
+        // Now try to resolve all messages.
+        for (_ <- 0 until Parameters.maxPowerIterations) {
+          val devicesToProcess = devices.filter {
+            _.pendingMessages.nonEmpty
+          }
+          //aprintln(s"devicesToProcess: $devicesToProcess")
+          if (devicesToProcess.isEmpty) break
+          devicesToProcess.foreach {
+            assignPowerAndProcessMessages
+          }
+        }
+      }
+    }
+
+    def assignPowerAndProcessMessages(device: Device): Unit = {
+      val messages = device.assignPower()
+      for (message <- messages) {
+        val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
+        val mappedMessage = mapMessage(message, remotePort)
+        remoteDevice.pendingMessages += mappedMessage
+        if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
+      }
+    }
+
+    def traceMessage(targetDevice: Device, message: PowerMessage): String = {
+      s"$timeOffset target: ${targetDevice.deviceID} message: $message"
+    }
+
+
     configuration.name.foreach(println)
 
     breakable {
@@ -77,7 +118,7 @@ class Grid(
         }
 
         log += EventLogItem(next)
-        assignPower(timeOffset, configuration, timeDelta)
+        assignPower()
 
         // Log any device that does not receive its required power.
         for (device <- devices) {
@@ -86,47 +127,10 @@ class Grid(
       }
     }
 
+
     log
   }
 
-  def assignPower(time: Time, configuration: RunConfiguration, timeDelta: Time): Unit = {
-    devices.foreach { device: Device => device.initializePowerCycle(links) }
-
-    breakable {
-      // First process all devices with consumption. May generate request messages.
-      devices.filter {
-        _.internalConsumption > Watts(0)
-      }.foreach {
-        assignPowerAndProcessMessages(time, configuration, _)
-      }
-
-      // Now try to resolve all messages.
-      for (_ <- 0 until Parameters.maxPowerIterations) {
-        val devicesToProcess = devices.filter {
-          _.pendingMessages.nonEmpty
-        }
-        //aprintln(s"devicesToProcess: $devicesToProcess")
-        if (devicesToProcess.isEmpty) break
-        devicesToProcess.foreach {
-          assignPowerAndProcessMessages(time, configuration, _)
-        }
-      }
-    }
-  }
-
-  def assignPowerAndProcessMessages(time: Time, configuration: RunConfiguration, device: Device): Unit = {
-    val messages = device.assignPower()
-    for (message <- messages) {
-      val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
-      val mappedMessage = mapMessage(message, remotePort)
-      remoteDevice.pendingMessages += mappedMessage
-      if (configuration.trace) println(traceMessage(time, remoteDevice, mappedMessage))
-    }
-  }
-
-  def traceMessage(time: Time, targetDevice: Device, message: PowerMessage): String = {
-    s"$time target: ${targetDevice.deviceID} message: $message"
-  }
 
   def mapMessage(message: PowerMessage, targetPort: Port): PowerMessage = message match {
     case p: PowerRequest => PowerRequest(targetPort, p.power)
