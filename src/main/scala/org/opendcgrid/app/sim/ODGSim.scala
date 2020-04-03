@@ -95,10 +95,20 @@ class Grid(
     def assignPowerAndProcessMessages(device: Device): Unit = {
       val messages = device.assignPower()
       for (message <- messages) {
+        // If there is something attached to the port, forward to remote device.
+        // TODO: really shouldn't be sending messages on non-attached ports
+        getLinkPort(message.port).foreach { remotePort: Port =>
+          val remoteDevice = getDevice(remotePort)
+          val mappedMessage = mapMessage(message, remotePort)
+          remoteDevice.pendingMessages += mappedMessage
+          if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
+        }
+        /*
         val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
         val mappedMessage = mapMessage(message, remotePort)
         remoteDevice.pendingMessages += mappedMessage
         if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
+        */
       }
     }
 
@@ -145,10 +155,13 @@ class Grid(
     devices.find(_.uuid == port.uuid).getOrElse(fatal(s"GetDevice failed - port: $port"))
   }
 
-  def getLinkedDeviceAndPort(device: Device, port: Port): (Device, Port) = {
-    val linkPort = bidirectionalLinks(port)
-    (getDevice(linkPort), linkPort)
-  }
+  /*
+    def getLinkedDeviceAndPort(device: Device, port: Port): (Device, Port) = {
+      val linkPort = bidirectionalLinks(port)
+      (getDevice(linkPort), linkPort)
+    }
+  */
+  def getLinkPort(port: Port): Option[Port] = bidirectionalLinks.get(port)
 
   def fatal(message: String) = throw new IllegalStateException(message)
 }
@@ -173,6 +186,18 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val init
 
   // Default power flow for every port is 0.
   ports.foreach { port => powerFlow += ((port, Watts(0))) }
+
+  // TODO: Get rid of this with a stateful subclass
+  def reset(): Unit = {
+    internalConsumption = initialInternalConsumption
+    internalProduction = initialInternalProduction
+    assignedInternalConsumption = Watts(0)
+    totalPowerDemand = Watts(0)
+    totalPowerAvailable = Watts(0)
+    requestsPending.clear()
+    grantsPending.clear()
+    pendingMessages.clear()
+  }
 
 
   // This is called once after each event to initialize the data for this device
@@ -226,17 +251,22 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val init
 
     if (assignedInternalConsumption < internalConsumption) {
       // Try to get power from some source
-      result ++= createDemandRequest()
+      for (_ <- untappedLoadPorts) {
+        result ++= createDemandRequest()
+      }
+      //result ++= createDemandRequest()
     }
 
     // Now deal with remaining demands.
+    // Grant partial power as available.
     for ((port, power) <- requestsPending.toSeq) {
-      if (totalPowerAvailable >= power) {
+      if (totalPowerAvailable > Watts(0)) {
         val grant = PowerGrant(port, power)
         result += grant
         totalPowerAvailable -= power
       } else {
         // Try to get power from some source
+        // TODO: this should request from all ports
         result ++= createDemandRequest()
       }
     }
@@ -244,9 +274,15 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val init
 
   }
 
+  def allLoadPorts: collection.Set[Port] = portDirections.filter(p => p._2 == Direction.Load).keySet
+
+  def allSourcePorts: collection.Set[Port] = portDirections.filter(p => p._2 == Direction.Source).keySet
+
+  def untappedLoadPorts: Seq[Port] = (allLoadPorts -- grantsPending.keys).toSeq
+
   def createDemandRequest(): Seq[PowerMessage] = {
-    val allLoadPorts = portDirections.filter(p => p._2 == Direction.Load).keySet
-    val untappedLoadPorts = (allLoadPorts -- grantsPending.keys).toSeq
+    //val allLoadPorts = portDirections.filter(p => p._2 == Direction.Load).keySet
+    //val untappedLoadPorts = (allLoadPorts -- grantsPending.keys).toSeq
     if (untappedLoadPorts.nonEmpty) {
       val targetPort = untappedLoadPorts.head
       val requestedPower = totalPowerDemand

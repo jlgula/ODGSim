@@ -44,4 +44,16 @@ class GridTest extends org.scalatest.FunSuite {
     assert(log.isEmpty)
   }
 
+  test("TwoSources") {
+    val log = grid4.run(Nil)
+    //val log = grid4.run(Nil, RunConfiguration(Some("TwoSources"), trace = true))
+    assert(log.isEmpty)
+  }
+
+  test("TwoLoads") {
+    val log = grid5.run(Nil)
+    //val log = grid5.run(Nil, RunConfiguration(Some("TwoLoads"), trace = true))
+    assert(log.isEmpty)
+  }
+
 }
