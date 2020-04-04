@@ -13,7 +13,7 @@ object Parameters {
 
 object ODGSim extends App {
   val input = ""
-  val logTry = GridBuilder.build(input).map { g: Grid => g.run(g.configuredEvents) }
+  val logTry = GridBuilder.build(input).map { g: Grid => g.run(RunConfiguration(g.configuredEvents)) }
 }
 
 // Enumeration of port directions
@@ -48,7 +48,7 @@ case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
 case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
-case class RunConfiguration(name: Option[String] = None, trace: Boolean = false)
+case class RunConfiguration(toDo: Seq[Event] = Nil, name: Option[String] = None, trace: Boolean = false)
 
 class Grid(
             val devices: Set[Device] = Set(),
@@ -57,39 +57,40 @@ class Grid(
 
   private val bidirectionalLinks = links ++ mutable.HashMap(links.toSeq.map { z: (Port, Port) => (z._2, z._1) }: _*)
 
-  def run(toDo: Seq[Event], configuration: RunConfiguration = RunConfiguration()): Seq[LogItem] = {
+  def run(configuration: RunConfiguration = RunConfiguration()): Seq[LogItem] = {
 
     var timeOffset: Time = Seconds(0) // Time since start of run
-    val events = mutable.PriorityQueue[Event](toDo: _*)(Ordering.by { t: Event => t.time }).reverse
+    val events = mutable.PriorityQueue[Event](configuration.toDo: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
     var eventCount: Int = 0
 
     def assignPower(): Unit = {
       devices.foreach { device: Device => device.initializePowerCycle(links) }
 
-      breakable {
-        // First process all devices with consumption. May generate request messages.
-        devices.filter {
-          _.internalConsumption > Watts(0)
-        }.foreach {
-          assignPowerAndProcessMessages
-        }
+      var powerIteration = 0
 
-        // Now try to resolve all messages.
-        for (_ <- 0 until Parameters.maxPowerIterations) {
-          val devicesToProcess = devices.filter {
-            _.pendingMessages.nonEmpty
-          }
-          //aprintln(s"devicesToProcess: $devicesToProcess")
-          if (devicesToProcess.isEmpty) break
-          devicesToProcess.foreach {
-            assignPowerAndProcessMessages
-          }
-        }
+      // First process all devices with consumption
+      var devicesToProcess = devices.filter {
+        _.needsPower
+      }
+      devicesToProcess.foreach {
+        assignPowerAndProcessMessages
       }
 
+      // Then try to resolve all messages.
+      do {
+        devicesToProcess = devices.filter {
+          _.hasMessagesToProcess
+        }
+        devicesToProcess.foreach {
+          assignPowerAndProcessMessages
+        }
+        powerIteration += 1
+        if (powerIteration >= Parameters.maxPowerIterations) fatal("Too many power iterations")
+      } while (devicesToProcess.nonEmpty)
+
       // Log any device that does not receive its required power.
-      devices.foreach(checkDevice)
+      devices.foreach(_.validatePower(timeOffset).map(log += _))
     }
 
     def assignPowerAndProcessMessages(device: Device): Unit = {
@@ -100,27 +101,15 @@ class Grid(
         getLinkPort(message.port).foreach { remotePort: Port =>
           val remoteDevice = getDevice(remotePort)
           val mappedMessage = mapMessage(message, remotePort)
-          remoteDevice.pendingMessages += mappedMessage
+          remoteDevice.postMessage(mappedMessage)
           if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
         }
-        /*
-        val (remoteDevice, remotePort) = getLinkedDeviceAndPort(device, message.port)
-        val mappedMessage = mapMessage(message, remotePort)
-        remoteDevice.pendingMessages += mappedMessage
-        if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
-        */
       }
     }
 
     def traceMessage(targetDevice: Device, message: PowerMessage): String = {
       s"$timeOffset target: ${targetDevice.deviceID} message: $message"
     }
-
-    // Validate internal state of device, logging error conditions
-    def checkDevice(device: Device): Unit = {
-      if (device.internalConsumption > device.assignedInternalConsumption) log += UnderPowerLogItem(timeOffset, device.deviceID, device.internalConsumption, device.assignedInternalConsumption)
-    }
-
 
     configuration.name.foreach(println) // Use for tracing particular tests
 
@@ -225,6 +214,20 @@ class Device(val deviceID: String, val uuid: Int, val ports: Seq[Port], val init
       }
     }
 
+  }
+
+  // Called in grid assign power loop to identify devices that need to be processed.
+  def needsPower: Boolean = internalConsumption > Watts(0)
+
+  // Called in grid assign power loop to identify devices with messages that need processing.
+  def hasMessagesToProcess: Boolean = pendingMessages.nonEmpty
+
+  // Called to add a message to the message queue.
+  def postMessage(message: PowerMessage): Unit = pendingMessages += message
+
+  // Called at the end of an assign power cycle to verify that the device has the power it needs.
+  def validatePower(time: Time): Option[LogItem] = {
+    if (internalConsumption > assignedInternalConsumption) Some(UnderPowerLogItem(time, deviceID, internalConsumption, assignedInternalConsumption)) else None
   }
 
   // Drain any pending power demands and compute total energy demand as the sum of queued demands.
