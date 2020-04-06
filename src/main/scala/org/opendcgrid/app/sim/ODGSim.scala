@@ -98,7 +98,7 @@ class Grid(
       val messages = device.assignPower()
       for (message <- messages) {
         // If there is something attached to the port, forward to remote device.
-        // TODO: really shouldn't be sending messages on non-attached ports
+        assert(getLinkPort(message.port).isDefined) // Device should not send messages on unattached ports
         getLinkPort(message.port).foreach { remotePort: Port =>
           val remoteDevice = getDevice(remotePort)
           val mappedMessage = mapMessage(message, remotePort)
@@ -185,7 +185,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
 
   class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power) extends MutableDevice {
     val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
-    val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]()
+    val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
 
     // These are only valid during an allocation cycle.
     var assignedInternalConsumption: Power = Watts(0) // Initialized to 0 at start of cycle
@@ -194,9 +194,6 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     val requestsPending: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]()
     val grantsPending: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]()
     val pendingMessages: mutable.Queue[PowerMessage] = mutable.Queue[PowerMessage]() // Power demands from other devices to be processed.
-
-    // Set the initial value of all port directions. Bidirectional ports default to load.
-    ports.foreach { port => portDirections += ((port, if (port.direction == Direction.Bidirectional) Direction.Load else port.direction)) }
 
     // Default power flow for every port is 0.
     ports.foreach { port => powerFlow += ((port, Watts(0))) }
@@ -271,7 +268,6 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
         for (_ <- untappedLoadPorts) {
           result ++= createDemandRequest()
         }
-        //result ++= createDemandRequest()
       }
 
       // Now deal with remaining demands.
@@ -283,8 +279,9 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
           totalPowerAvailable -= power
         } else {
           // Try to get power from some source
-          // TODO: this should request from all ports
-          result ++= createDemandRequest()
+          for (_ <- untappedLoadPorts) {
+            result ++= createDemandRequest()
+          }
         }
       }
       result
