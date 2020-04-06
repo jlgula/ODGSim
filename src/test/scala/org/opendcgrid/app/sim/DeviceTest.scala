@@ -6,16 +6,16 @@ import Samples._
 class DeviceTest extends org.scalatest.FunSuite {
 
   test("Device") {
-    val device = new Device(deviceName, deviceUUID, ports)
+    val device = new BasicDevice(deviceName, deviceUUID, ports)
     assert(device.deviceID == deviceName)
   }
 
 
   test("initializePowerCycle") {
-    for (device <- Seq(device9)) {
-      device.reset()
+    for (device <- Seq(device9.buildMutableDevice())) {
+      //device.reset()
       device.initializePowerCycle(Map[Port, Port]())
-      assert(device.pendingMessages.isEmpty)
+      assert(!device.hasMessagesToProcess)
       assertResult(Watts(0))(device.assignedInternalConsumption)
       assertResult(device.internalConsumption)(device.totalPowerDemand)
       assertResult(device.internalProduction)(device.totalPowerAvailable)
@@ -25,8 +25,8 @@ class DeviceTest extends org.scalatest.FunSuite {
   }
 
   test("assignPower") {
-    for (device <- allDevices) {
-      device.reset()
+    for (device <- allDevices.map(_.buildMutableDevice())) {
+      //device.reset()
       device.initializePowerCycle(Map[Port, Port]())
       val _ = device.assignPower()
     }
@@ -34,8 +34,8 @@ class DeviceTest extends org.scalatest.FunSuite {
 
   test("minimumGrantFromInternalProduction") {
     //for (device <- allDevices) {
-    for (device <- allDevices) {
-      device.reset()
+    for (device <- allDevices.map(_.buildMutableDevice())) {
+      // device.reset()
       //println(device.deviceID)
       device.initializePowerCycle(Map[Port, Port]())
       if (device.totalPowerAvailable >= Watts(1)) {

@@ -13,53 +13,53 @@ object Samples {
   val port0: Port = Port(deviceUUID, "port0")
   val port1: Port = Port(deviceUUID, "port1")
   val ports = Seq(port0, port1)
-  val device0 = new Device(deviceName, deviceUUID, Seq())
+  val device0 = new BasicDevice(deviceName, deviceUUID, Seq())
 
   val deviceName1 = "testLoadDevice1"
   val deviceUUID1 = 1
   val port10: Port = Port(deviceUUID1, "loadPort10")
-  val device1 = new Device(deviceName1, deviceUUID1, Seq(port10), initialInternalConsumption = internalConsumption1)
+  val device1 = new BasicDevice(deviceName1, deviceUUID1, Seq(port10), internalConsumption = internalConsumption1)
 
   val deviceUUID2 = 2
   val port20: Port = Port(deviceUUID2, "loadPort20")
   val port21: Port = Port(deviceUUID2, "loadPort21")
   val deviceName2 = "testLoadDevice2"
-  val device2 = new Device(deviceName2, deviceUUID2, Seq(port20, port21), initialInternalConsumption = internalConsumption1)
+  val device2 = new BasicDevice(deviceName2, deviceUUID2, Seq(port20, port21), internalConsumption = internalConsumption1)
 
   val deviceUUID3 = 3
   val deviceName3 = "testLoadDevice3"
-  val device3 = new Device(deviceName3, deviceUUID3, Seq(), initialInternalConsumption = internalConsumption1, initialInternalProduction = internalProduction1)
+  val device3 = new BasicDevice(deviceName3, deviceUUID3, Seq(), internalConsumption = internalConsumption1, internalProduction = internalProduction1)
 
   val deviceUUID4 = 4
-  val device4 = new Device("testLoadDevice4", deviceUUID4, Seq(), initialInternalConsumption = internalConsumption2, initialInternalProduction = internalProduction1)
+  val device4 = new BasicDevice("testLoadDevice4", deviceUUID4, Seq(), internalConsumption = internalConsumption2, internalProduction = internalProduction1)
 
   // Basic source device
   val deviceUUID5 = 5
   val port50: Port = Port(deviceUUID5, "sourcePort50", Direction.Source)
-  val device5 = new Device("testSourceDevice5", deviceUUID5, Seq(port50), initialInternalProduction = internalProduction1)
+  val device5 = new BasicDevice("testSourceDevice5", deviceUUID5, Seq(port50), internalProduction = internalProduction1)
 
   // Daisy-chain repeater device
   val deviceUUID6 = 6
   val port60: Port = Port(deviceUUID6, "port60", Direction.Source)
   val port61: Port = Port(deviceUUID6, "port61", Direction.Load)
-  val device6 = new Device("device6", deviceUUID6, Seq(port60, port61))
+  val device6 = new BasicDevice("device6", deviceUUID6, Seq(port60, port61))
 
   // Two sources
   val deviceUUID7 = 7
   val port70: Port = Port(deviceUUID7, "port70", Direction.Load)
   val port71: Port = Port(deviceUUID7, "port71", Direction.Load)
-  val device7 = new Device("device7", deviceUUID7, Seq(port70, port71), initialInternalConsumption = internalConsumption2)
+  val device7 = new BasicDevice("device7", deviceUUID7, Seq(port70, port71), internalConsumption = internalConsumption2)
 
   // Lower power source device
   val deviceUUID8 = 8
   val port80: Port = Port(deviceUUID8, "sourcePort80", Direction.Source)
-  val device8 = new Device("device8", deviceUUID8, Seq(port80), initialInternalProduction = internalProduction2)
+  val device8 = new BasicDevice("device8", deviceUUID8, Seq(port80), internalProduction = internalProduction2)
 
   // Source with 2 loads
   val deviceUUID9 = 9
   val port90: Port = Port(deviceUUID9, "sourcePort90", Direction.Source)
   val port91: Port = Port(deviceUUID9, "sourcePort91", Direction.Source)
-  val device9 = new Device("device9", deviceUUID9, Seq(port90, port91), initialInternalProduction = internalProduction1)
+  val device9 = new BasicDevice("device9", deviceUUID9, Seq(port90, port91), internalProduction = internalProduction1)
 
   val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9)
 
