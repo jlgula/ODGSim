@@ -2,6 +2,7 @@ package org.opendcgrid.app.sim
 
 import squants.energy.Watts
 import Samples._
+import org.scalactic.Fail
 
 class DeviceTest extends org.scalatest.FunSuite {
 
@@ -47,6 +48,19 @@ class DeviceTest extends org.scalatest.FunSuite {
         }
       }
     }
+  }
 
+  test("grantLessThanRequest") {
+    //for (device <- allDevices) {
+    val device = device8.buildMutableDevice()
+    device.initializePowerCycle(Map(port80 -> port10))
+    device.postMessage(PowerRequest(port80, internalConsumption20))
+    val grants = device.assignPower()
+    assert(grants.size == 1)
+    val grant = grants.head
+    grant match {
+      case g: PowerGrant => assertResult(device.internalProduction)(g.pwr)
+      case _ => Fail(s"Unexpected response: $grant")
+    }
   }
 }

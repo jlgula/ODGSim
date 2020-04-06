@@ -29,7 +29,7 @@ class GridTest extends org.scalatest.FunSuite {
     val grid = new Grid(Set(device4))
     val log = grid.run()
     assert(log.size == 1)
-    assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption2, internalProduction1))
+    assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption30, internalProduction20))
   }
 
   test("BasicSourceAndLoad") {
@@ -52,6 +52,12 @@ class GridTest extends org.scalatest.FunSuite {
   test("TwoLoads") {
     val log = grid5.run()
     //val log = grid5.run(RunConfiguration(Nil, Some("TwoLoads"), trace = true))
+    assert(log.isEmpty)
+  }
+
+  test("Assymmetric") {
+    val log = grid6.run()
+    //val log = grid6.run(RunConfiguration(Nil, Some("Assymmetric"), trace = true))
     assert(log.isEmpty)
   }
 

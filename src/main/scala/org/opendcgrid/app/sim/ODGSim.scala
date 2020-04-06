@@ -103,13 +103,14 @@ class Grid(
           val remoteDevice = getDevice(remotePort)
           val mappedMessage = mapMessage(message, remotePort)
           remoteDevice.postMessage(mappedMessage)
-          if (configuration.trace) println(traceMessage(remoteDevice, mappedMessage))
+          val sourceDevice = getDevice(message.port)
+          if (configuration.trace) println(traceMessage(sourceDevice, remoteDevice, mappedMessage))
         }
       }
     }
 
-    def traceMessage(targetDevice: Device, message: PowerMessage): String = {
-      s"$timeOffset target: ${targetDevice.deviceID} message: $message"
+    def traceMessage(sourceDevice: Device, targetDevice: Device, message: PowerMessage): String = {
+      s"$timeOffset source: ${sourceDevice.deviceID} target: ${targetDevice.deviceID} message: $message"
     }
 
     configuration.name.foreach(println) // Use for tracing particular tests
@@ -141,6 +142,7 @@ class Grid(
     case p: PowerGrant => PowerGrant(targetPort, p.power)
   }
 
+  // Gets the device referenced by a port by matching uuid.
   def getDevice(port: Port): MutableDevice = {
     mutableDevices.find(_.uuid == port.uuid).getOrElse(fatal(s"GetDevice failed - port: $port"))
   }
@@ -254,14 +256,18 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       powerRequests.foreach { r: PowerMessage => requestsPending += (r.port -> r.power) }
       val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
       totalPowerAvailable += powerGrants.map(_.power).fold(Watts(0))((a, b) => a + b)
+      assert(totalPowerAvailable >= Watts(0))
       powerGrants.foreach { r: PowerMessage => grantsPending += (r.port -> r.power) }
       assert(pendingMessages.isEmpty)
 
       // Deal with internal consumption first
       val assignProductionToConsumption = totalPowerAvailable.min(internalConsumption - assignedInternalConsumption)
+      assert(assignProductionToConsumption >= Watts(0))
       //println(s"device: ${this.deviceID} assignProductionToConsumption: $assignProductionToConsumption")
       assignedInternalConsumption += assignProductionToConsumption
+      assert(assignedInternalConsumption >= Watts(0))
       totalPowerDemand -= assignProductionToConsumption
+      assert(totalPowerDemand >= Watts(0))
 
       if (assignedInternalConsumption < internalConsumption) {
         // Try to get power from some source
@@ -274,9 +280,10 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       // Grant partial power as available.
       for ((port, power) <- requestsPending.toSeq) {
         if (totalPowerAvailable > Watts(0)) {
-          val grant = PowerGrant(port, power)
+          val powerGranted = power.min(totalPowerAvailable) // Grant the min of request and power available
+          val grant = PowerGrant(port, powerGranted)
           result += grant
-          totalPowerAvailable -= power
+          totalPowerAvailable -= powerGranted
         } else {
           // Try to get power from some source
           for (_ <- untappedLoadPorts) {
