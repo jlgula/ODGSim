@@ -47,6 +47,15 @@ class Grid(
 
       // Log any device that does not receive its required power.
       mutableDevices.foreach(_.validatePower(timeOffset).map(log += _))
+
+      if (configuration.trace) {
+        for (device <- mutableDevices) {
+          for (port <- device.ports) {
+            println(traceDevicePort(device, port))
+          }
+        }
+      }
+
     }
 
     def assignPowerAndProcessMessages(device: MutableDevice): Unit = {
@@ -71,6 +80,11 @@ class Grid(
     def traceEvent(event: Event): String = {
       s"$timeOffset event: $event"
     }
+
+    def traceDevicePort(device: MutableDevice, port: Port): String = {
+      s"$timeOffset device: ${port.uuid} port: ${port.name}, power: ${device.portPower(port)}"
+    }
+
 
     configuration.name.foreach(println) // Use for tracing particular tests
 

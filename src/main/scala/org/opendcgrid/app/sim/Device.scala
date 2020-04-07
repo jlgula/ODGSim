@@ -40,6 +40,9 @@ trait MutableDevice extends Device {
 
   // Change the consumption or production state.
   def updateState(consumption: Power = Watts(0), production: Power = Watts(0))
+
+  // Display the current power flow for a port
+  def portPower(port: Port): Power
 }
 
 // Battery Policy
@@ -110,6 +113,8 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     def validatePower(time: Time): Option[LogItem] = {
       if (consumption > assignedInternalConsumption) Some(UnderPowerLogItem(time, deviceID, consumption, assignedInternalConsumption)) else None
     }
+
+    def portPower(port: Port): Power = this.powerFlow(port)
 
     // Drain any pending power demands and compute total energy demand as the sum of queued demands.
     // Reduce this by any remaining internal energy.
