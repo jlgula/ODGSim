@@ -2,8 +2,9 @@ package org.opendcgrid.app.sim
 
 import squants.time.Seconds
 import Samples._
+import squants.energy.Watts
 
-class GridTest extends org.scalatest.FunSuite {
+class GridTest extends org.scalatest.funsuite.AnyFunSuite {
 
   test("EmptyGrid") {
     val grid = new Grid()
@@ -15,8 +16,10 @@ class GridTest extends org.scalatest.FunSuite {
     val grid = new Grid()
     val event = TickEvent(Seconds(1))
     val log = grid.run(RunConfiguration(Seq(event)))
-    assert(log.size == 1)
-    assert(log.head == EventLogItem(event))
+    //assert(log.size == 1)
+    //assert(log.head == EventLogItem(event))
+    assert(log.isEmpty)
+
   }
 
   test("SelfContainedDeviceWithEnoughPower") {
@@ -60,5 +63,20 @@ class GridTest extends org.scalatest.FunSuite {
     //val log = grid6.run(RunConfiguration(Nil, Some("Assymmetric"), trace = true))
     assert(log.isEmpty)
   }
+
+  test("OffDevice") {
+    val log = grid7.run()
+    //val log = grid7.run(RunConfiguration(Nil, Some("OffDevice"), trace = true))
+    assert(log.isEmpty)
+  }
+
+  test("OffDevice delayed start") {
+    val events = Seq(UpdateDeviceState(Seconds(1), device = deviceUUID11, consumption = Watts(10)), UpdateDeviceState(Seconds(2), device = deviceUUID11, consumption = Watts(0)))
+    val config = RunConfiguration(events)
+    //val config = RunConfiguration(events, Some("OffDevice delayed start"), trace = true)
+    val log = grid7.run(config)
+    assert(log.isEmpty)
+  }
+
 
 }

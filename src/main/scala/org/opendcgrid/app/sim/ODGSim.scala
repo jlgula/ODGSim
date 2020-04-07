@@ -3,7 +3,7 @@ package org.opendcgrid.app.sim
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import squants.time.{Seconds, Time}
-import squants.energy.{Power, Watts}
+import squants.energy.{Energy, Power, WattHours, Watts}
 
 object Parameters {
   val maxEvents = 1000 // Maximum number of events processed by Grid.run
@@ -30,11 +30,17 @@ object Direction {
 
 case class Port(uuid: Int, name: String, direction: Direction = Direction.Load)
 
+case class Battery(capacity: Energy, chargeRate: Power, dischargeRate: Power, initialCharge: Energy = WattHours(0))
+
+
 sealed abstract class Event(val time: Time)
 
-//case class QuitEvent(t: Time = Seconds(0)) extends Event(t)
-
+// Tick events are used to mark the passage of time, for example, charging a battery.
 case class TickEvent(t: Time = Seconds(0)) extends Event(t)
+
+// Used to turn on or off devices, either sources or loads.
+case class UpdateDeviceState(t: Time = Seconds(0), device: Int, consumption: Power = Watts(0), production: Power = Watts(0)) extends Event(t)
+
 
 sealed abstract class LogItem(val time: Time)
 
@@ -113,6 +119,10 @@ class Grid(
       s"$timeOffset source: ${sourceDevice.deviceID} target: ${targetDevice.deviceID} message: $message"
     }
 
+    def traceEvent(event: Event): String = {
+      s"$timeOffset event: $event"
+    }
+
     configuration.name.foreach(println) // Use for tracing particular tests
 
     // Run through the power loop once to deal with static conditions.
@@ -126,9 +136,11 @@ class Grid(
       next match {
         //case _: QuitEvent => events.clear()
         case _: TickEvent => // just used to trigger power assignments
+        case u: UpdateDeviceState => mutableDevices.find(_.uuid == u.device).foreach(_.updateState(u.consumption, u.production))
       }
 
-      log += EventLogItem(next)
+      //log += EventLogItem(next)
+      if (configuration.trace) println(traceEvent(next))
       assignPower()
 
     }
@@ -158,6 +170,7 @@ trait Device {
   val ports: Seq[Port]
   val internalConsumption: Power
   val internalProduction: Power
+  val battery: Option[Battery]
 
   def buildMutableDevice(): MutableDevice
 }
@@ -180,16 +193,29 @@ trait MutableDevice extends Device {
 
   // Invoked at the end of an assign power cycle to verify that internal consumption needs met.
   def validatePower(time: Time): Option[LogItem]
+
+  // Current charge of the battery, if any
+  def batteryCharge: Energy
+
+  // Change the consumption or production state.
+  def updateState(consumption: Power = Watts(0), production: Power = Watts(0))
 }
 
-class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0)) extends Device {
-  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction)
+// Battery Policy
+// The device always tries to get enough power to charge its battery but it will use the battery to fulfill any existing demand.
 
-  class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power) extends MutableDevice {
+class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0), val battery: Option[Battery] = None) extends Device {
+  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery)
+
+  class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power, val battery: Option[Battery] = None) extends MutableDevice {
+    var batteryCharge: Energy = WattHours(0)
+    var consumption: Power = internalConsumption
+    var production: Power = internalProduction
     val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
     val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
 
     // These are only valid during an allocation cycle.
+    var batteryFlow: Power = Watts(0) // Power flow into or out of the battery. Inbound is negative, outbound is positive.
     var assignedInternalConsumption: Power = Watts(0) // Initialized to 0 at start of cycle
     var totalPowerDemand: Power = Watts(0) // Initialized to 0 at start of cycle
     var totalPowerAvailable: Power = Watts(0) // Initialized to production  at start of cycle.
@@ -198,15 +224,17 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     val pendingMessages: mutable.Queue[PowerMessage] = mutable.Queue[PowerMessage]() // Power demands from other devices to be processed.
 
     // Default power flow for every port is 0.
-    ports.foreach { port => powerFlow += ((port, Watts(0))) }
+    //ports.foreach { port => powerFlow += ((port, Watts(0))) }
 
     def buildMutableDevice(): MutableDevice = this
 
     // This is called once after each event to initialize the data for this device
     def initializePowerCycle(links: Map[Port, Port]): Unit = {
+      val result: mutable.ArrayBuffer[PowerMessage] = mutable.ArrayBuffer[PowerMessage]()
       assignedInternalConsumption = Watts(0)
-      totalPowerDemand = internalConsumption
-      totalPowerAvailable = internalProduction
+      totalPowerDemand = consumption
+      totalPowerAvailable = production
+      ports.foreach { port => powerFlow += ((port, Watts(0))) } // Default power flow for every port is 0.
       requestsPending.clear()
       grantsPending.clear()
 
@@ -230,7 +258,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     }
 
     // Called in grid assign power loop to identify devices that need to be processed.
-    def needsPower: Boolean = internalConsumption > Watts(0)
+    def needsPower: Boolean = consumption > Watts(0)
 
     // Called in grid assign power loop to identify devices with messages that need processing.
     def hasMessagesToProcess: Boolean = pendingMessages.nonEmpty
@@ -240,7 +268,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
 
     // Called at the end of an assign power cycle to verify that the device has the power it needs.
     def validatePower(time: Time): Option[LogItem] = {
-      if (internalConsumption > assignedInternalConsumption) Some(UnderPowerLogItem(time, deviceID, internalConsumption, assignedInternalConsumption)) else None
+      if (consumption > assignedInternalConsumption) Some(UnderPowerLogItem(time, deviceID, consumption, assignedInternalConsumption)) else None
     }
 
     // Drain any pending power demands and compute total energy demand as the sum of queued demands.
@@ -257,11 +285,15 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
       totalPowerAvailable += powerGrants.map(_.power).fold(Watts(0))((a, b) => a + b)
       assert(totalPowerAvailable >= Watts(0))
-      powerGrants.foreach { r: PowerMessage => grantsPending += (r.port -> r.power) }
+      powerGrants.foreach { r: PowerMessage => {
+        grantsPending += (r.port -> r.power)
+        this.powerFlow.update(r.port, r.power)
+      }
+      }
       assert(pendingMessages.isEmpty)
 
       // Deal with internal consumption first
-      val assignProductionToConsumption = totalPowerAvailable.min(internalConsumption - assignedInternalConsumption)
+      val assignProductionToConsumption = totalPowerAvailable.min(consumption - assignedInternalConsumption)
       assert(assignProductionToConsumption >= Watts(0))
       //println(s"device: ${this.deviceID} assignProductionToConsumption: $assignProductionToConsumption")
       assignedInternalConsumption += assignProductionToConsumption
@@ -269,7 +301,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       totalPowerDemand -= assignProductionToConsumption
       assert(totalPowerDemand >= Watts(0))
 
-      if (assignedInternalConsumption < internalConsumption) {
+      if (assignedInternalConsumption < consumption) {
         // Try to get power from some source
         for (_ <- untappedLoadPorts) {
           result ++= createDemandRequest()
@@ -284,6 +316,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
           val grant = PowerGrant(port, powerGranted)
           result += grant
           totalPowerAvailable -= powerGranted
+          this.powerFlow.update(port, -powerGranted)
         } else {
           // Try to get power from some source
           for (_ <- untappedLoadPorts) {
@@ -313,12 +346,20 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       else Seq()
     }
 
+    def batteryDemand: Power = {
+      if (battery.isEmpty || batteryCharge >= battery.get.capacity) Watts(0)
+      else battery.get.chargeRate
+    }
 
     // Find the current value of all ports in a particular direction.
     def filterPorts(direction: Direction): Seq[Port] = ports.filter {
       portDirections(_) == direction
     }
 
+    def updateState(consumption: Power, production: Power): Unit = {
+      this.consumption = consumption
+      this.production = production
+    }
   }
 
   override def toString: String = s"Device($deviceID, $uuid)"

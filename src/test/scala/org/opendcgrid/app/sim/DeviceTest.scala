@@ -4,7 +4,7 @@ import squants.energy.Watts
 import Samples._
 import org.scalactic.Fail
 
-class DeviceTest extends org.scalatest.FunSuite {
+class DeviceTest extends org.scalatest.funsuite.AnyFunSuite {
 
   test("Device") {
     val device = new BasicDevice(deviceName, deviceUUID, ports)

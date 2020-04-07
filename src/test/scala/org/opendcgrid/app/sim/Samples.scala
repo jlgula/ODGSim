@@ -69,7 +69,12 @@ object Samples {
   val port102: Port = Port(deviceUUID10, "port102", Direction.Source)
   val device10 = new BasicDevice("device10", deviceUUID10, Seq(port100, port101, port102))
 
-  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10)
+  // Off device
+  val deviceUUID11 = 11
+  val port110: Port = Port(deviceUUID11, "port110", Direction.Load)
+  val device11 = new BasicDevice("device11", deviceUUID11, Seq(port110))
+
+  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11)
 
   val grid2 = new Grid(Set(device1, device5), Map(port50 -> port10)) // Basic load and source
 
@@ -85,4 +90,6 @@ object Samples {
   // Assymetric grid with 2 sources, one combiner
   val grid6 = new Grid(Set(device7, device8, device9, device10), Map(port91 -> port71, port90 -> port101, port80 -> port100, port102 -> port70))
 
+  // Simple source-load grid with load initially off.
+  val grid7 = new Grid(Set(device11, device5), Map(port50 -> port110))
 }
