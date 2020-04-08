@@ -16,12 +16,14 @@ class Grid(
   def run(configuration: RunConfiguration = RunConfiguration()): Seq[LogItem] = {
 
     var timeOffset: Time = Seconds(0) // Time since start of run
-    val events = mutable.PriorityQueue[Event](configuration.toDo: _*)(Ordering.by { t: Event => t.time }).reverse
+    var timeDelta: Time = Seconds(0) // Time since last event
+    val ticks = (1 until Parameters.maxTicks).map(Seconds(_)).map(TickEvent)
+    val events = mutable.PriorityQueue[Event](configuration.toDo ++ ticks: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
     var eventCount: Int = 0
 
-    def assignPower(): Unit = {
-      mutableDevices.foreach { device: MutableDevice => device.initializePowerCycle(links) }
+    def assignPower(timeDelta: Time): Unit = {
+      mutableDevices.foreach { device: MutableDevice => device.updatePowerState(timeDelta, links) }
 
       var powerIteration = 0
 
@@ -46,7 +48,16 @@ class Grid(
       } while (devicesToProcess.nonEmpty)
 
       // Log any device that does not receive its required power.
-      mutableDevices.foreach(_.validatePower(timeOffset).map(log += _))
+      for (device <- mutableDevices) {
+        val result = device.validatePower(timeOffset)
+        if (result.isDefined) {
+          val item = result.get
+          log += item
+          if (configuration.trace) {
+            println(traceLog(item))
+          }
+        }
+      }
 
       if (configuration.trace) {
         for (device <- mutableDevices) {
@@ -77,34 +88,38 @@ class Grid(
       s"$timeOffset source: ${sourceDevice.deviceID} target: ${targetDevice.deviceID} message: $message"
     }
 
-    def traceEvent(event: Event): String = {
-      s"$timeOffset event: $event"
-    }
+    def traceEvent(event: Event): String = s"$timeOffset event: $event"
 
     def traceDevicePort(device: MutableDevice, port: Port): String = {
       s"$timeOffset device: ${port.uuid} port: ${port.name}, power: ${device.portPower(port)}"
     }
 
+    def traceLog(item: LogItem): String = s"$timeOffset logItem: $item"
+
 
     configuration.name.foreach(println) // Use for tracing particular tests
 
     // Run through the power loop once to deal with static conditions.
-    assignPower()
+    assignPower(Seconds(0))
 
     while (events.nonEmpty) {
       val next = events.dequeue()
       eventCount += 1
       if (eventCount >= Parameters.maxEvents) fatal("Event count overflow")
+      timeDelta = next.time - timeOffset
       timeOffset = next.time
       next match {
         //case _: QuitEvent => events.clear()
         case _: TickEvent => // just used to trigger power assignments
-        case u: UpdateDeviceState => mutableDevices.find(_.uuid == u.device).foreach(_.updateState(u.consumption, u.production))
+        case u: UpdateDeviceState =>
+          assignPower(timeDelta) // Make sure the state is up to date before we change production or consumption.
+          timeDelta = Seconds(0) // Get ready to rerun assign power at the same time but new configuration.
+          mutableDevices.find(_.uuid == u.device).foreach(_.updateState(u.consumption, u.production))
       }
 
       //log += EventLogItem(next)
       if (configuration.trace) println(traceEvent(next))
-      assignPower()
+      assignPower(timeDelta)
 
     }
 

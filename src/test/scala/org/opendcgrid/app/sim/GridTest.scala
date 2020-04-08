@@ -31,18 +31,19 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
   test("SelfContainedDeviceWithoutEnoughPower") {
     val grid = new Grid(Set(device4))
     val log = grid.run()
-    assert(log.size == 1)
-    assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption30, internalProduction20))
+    assert(log.size == Parameters.maxTicks)
+    //assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption30, internalProduction20))
   }
 
   test("BasicSourceAndLoad") {
     val log = grid2.run()
+    //val log = grid2.run(RunConfiguration(Nil, Some("BasicSourceAndLoad"), true))
     assert(log.isEmpty)
   }
 
   test("DaisyChain") {
     val log = grid3.run()
-    //val log = grid3.run(Nil, RunConfiguration(Some("DaisyChain"), true))
+    //val log = grid3.run(RunConfiguration(Nil, Some("DaisyChain"), true))
     assert(log.isEmpty)
   }
 
