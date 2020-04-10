@@ -19,6 +19,7 @@ trait Device {
 }
 
 trait MutableDevice extends Device {
+  // True if the device had enough power to operate during the entire power cycle.
   def on: Boolean
 
   def on_=(value: Boolean)
@@ -66,7 +67,7 @@ trait MutableDevice extends Device {
 // Battery Policy
 // The device always tries to get enough power to charge its battery but it will use the battery to fulfill any existing demand.
 
-class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0), val battery: Battery = NullBattery) extends Device {
+class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Nil, val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0), val battery: Battery = NullBattery) extends Device {
   def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery)
 
   class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power, val battery: Battery) extends MutableDevice {
@@ -159,7 +160,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
 
     // Called at the end of an assign power cycle to verify that the device has the power it needs.
     def validatePower(time: Time): Option[LogItem] = {
-      if (consumption > assignedInternalConsumption) Some(UnderPowerLogItem(time, deviceID, consumption, assignedInternalConsumption)) else None
+      if (consumption > assignedInternalConsumption) Some(LogItem.UnderPower(time, deviceID, consumption, assignedInternalConsumption)) else None
     }
 
     def portPower(port: Port): Power = this.powerFlow(port)

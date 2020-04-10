@@ -46,21 +46,6 @@ class Grid(
     val log = ArrayBuffer[LogItem]()
     var eventCount: Int = 0
 
-    def traceMessage(sourceDevice: Device, targetDevice: Device, message: PowerMessage): String = {
-      s"$timeOffset message source: ${sourceDevice.deviceID} target: ${targetDevice.deviceID} message: $message"
-    }
-
-    def traceEvent(event: Event): String = s"$timeOffset event: $event"
-
-    def traceDevicePort(device: MutableDevice, port: Port): String = {
-      s"$timeOffset port: ${port.name}, power: ${device.portPower(port)}"
-    }
-
-    def traceLog(item: LogItem): String = s"$timeOffset logItem: $item"
-
-    def traceDevice(device: MutableDevice): String = s"$timeOffset device: ${device.deviceID}:${device.uuid} consumption: ${device.consumption} production: ${device.production} charge: ${device.batteryCharge} on: ${device.on}"
-
-
     def assignPower(timeDelta: Time): Unit = {
       mutableDevices.foreach { device: MutableDevice => device.updatePowerState(timeDelta, links) }
       moveEnergy(timeDelta)
@@ -89,25 +74,12 @@ class Grid(
 
       // Log any device that does not receive its required power.
       for (device <- mutableDevices) {
-        val result = device.validatePower(timeOffset)
-        if (result.isDefined) {
-          val item = result.get
-          log += item
-          if (configuration.trace) {
-            println(traceLog(item))
-          }
+        device.validatePower(timeOffset).foreach(report(ReportSelection.UnderPower, _))
+        report(ReportSelection.DeviceStatus, LogItem.Device(timeOffset, device.deviceID, device.uuid, device.consumption, device.production, device.batteryCharge, device.on))
+        for (port <- device.ports) {
+          report(ReportSelection.PortStatus, LogItem.Port(timeOffset, device.deviceID, port.name, device.portPower(port)))
         }
       }
-
-      if (configuration.trace) {
-        for (device <- mutableDevices) {
-          println(traceDevice(device))
-          for (port <- device.ports) {
-            println(traceDevicePort(device, port))
-          }
-        }
-      }
-
     }
 
     def assignPowerAndProcessMessages(device: MutableDevice): Unit = {
@@ -120,7 +92,7 @@ class Grid(
           val mappedMessage = mapMessage(message, remotePort)
           remoteDevice.postMessage(mappedMessage)
           val sourceDevice = getDevice(message.port)
-          if (configuration.trace) println(traceMessage(sourceDevice, remoteDevice, mappedMessage))
+          report(ReportSelection.PowerMessage, LogItem.Message(timeOffset, sourceDevice.uuid, remoteDevice.uuid, mappedMessage))
         }
       }
     }
@@ -160,7 +132,12 @@ class Grid(
       }
     }
 
-    configuration.name.foreach(println) // Use for tracing particular tests
+    def report(selection: ReportSelection, item: LogItem): Unit = {
+      if (configuration.log.contains(selection)) log += item
+      if (configuration.trace.contains(selection)) println(item)
+    }
+
+    configuration.name.foreach((n: String) => report(ReportSelection.ConfigurationName, LogItem.Configuration(timeOffset, n)))
 
     // Run through the power loop once to deal with static conditions.
     assignPower(Seconds(0))
@@ -173,15 +150,16 @@ class Grid(
       timeOffset = next.time
       next match {
         //case _: QuitEvent => events.clear()
-        case _: TickEvent => // just used to trigger power assignments
+        case _: TickEvent => report(ReportSelection.TickEvent, LogItem.EventItem(next)) // just used to trigger power assignments
         case u: UpdateDeviceState =>
           assignPower(timeDelta) // Make sure the state is up to date before we change production or consumption.
           timeDelta = Seconds(0) // Get ready to rerun assign power at the same time but new configuration.
           mutableDevices.find(_.uuid == u.device).foreach(_.updateState(u.consumption, u.production))
+          report(ReportSelection.UpdateDeviceEvent, LogItem.EventItem(next))
       }
 
       //log += EventLogItem(next)
-      if (configuration.trace) println(traceEvent(next))
+      //if (configuration.trace) println(traceEvent(next))
       assignPower(timeDelta)
 
     }

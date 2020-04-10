@@ -1,6 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Power, Watts}
+import squants.energy.{Power, WattHours, Watts}
 
 object Samples {
   val internalConsumption10: Power = Watts(10)
@@ -8,6 +8,8 @@ object Samples {
   val internalConsumption30: Power = Watts(30)
   val internalProduction20: Power = Watts(20)
   val internalProduction10: Power = Watts(10)
+
+  val battery01: Battery = Battery(capacity = WattHours(10), chargeRate = Watts(10), dischargeRate = Watts(20))
 
   val deviceName = "testDevice0"
   val deviceUUID = 0
@@ -74,7 +76,11 @@ object Samples {
   val port110: Port = Port(deviceUUID11, "port110", Direction.Load)
   val device11 = new BasicDevice("device11", deviceUUID11, Seq(port110))
 
-  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11)
+  // Self-contained device with production, consumption and battery.
+  val deviceUUID12 = 12
+  val device12 = new BasicDevice("device12", deviceUUID12, internalConsumption = Watts(20), internalProduction = Watts(10), battery = battery01)
+
+  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12)
 
   val grid2 = new Grid(Set(device1, device5), Map(port50 -> port10)) // Basic load and source
 
@@ -92,4 +98,7 @@ object Samples {
 
   // Simple source-load grid with load initially off.
   val grid7 = new Grid(Set(device11, device5), Map(port50 -> port110))
+
+  // Minimal self-contained device with battery.
+  val grid8 = new Grid(Set(device12))
 }

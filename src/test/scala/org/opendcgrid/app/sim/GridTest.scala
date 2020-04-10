@@ -1,6 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.time.Seconds
+import squants.time.{Hours, Seconds}
 import Samples._
 import squants.energy.Watts
 
@@ -35,7 +35,7 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     for (tick <- 0 until Parameters.tickCount) {
       val item = log(tick)
       val time = tick * Parameters.tickInterval
-      assert(item == UnderPowerLogItem(time, device4.deviceID, internalConsumption30, Watts(0)))
+      assert(item == LogItem.UnderPower(time, device4.deviceID, internalConsumption30, Watts(0)))
     }
   }
 
@@ -64,8 +64,9 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
   }
 
   test("Assymmetric") {
-    val log = grid6.run()
-    //val log = grid6.run(RunConfiguration(Nil, Some("Assymmetric"), trace = true))
+    val config: RunConfiguration = RunConfiguration()
+    //val config: RunConfiguration = RunConfiguration(name = Some("Assymmetric"), tickInterval = Hours(1), trace = ReportSelection.all, log = Set())
+    val log = grid6.run(config)
     assert(log.isEmpty)
   }
 
@@ -80,6 +81,20 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     val config = RunConfiguration(events)
     //val config = RunConfiguration(events, Some("OffDevice delayed start"), trace = true)
     val log = grid7.run(config)
+    assert(log.isEmpty)
+  }
+
+  test("DaisyChainWithLongInterval") {
+    val config: RunConfiguration = RunConfiguration(tickInterval = Hours(1))
+    val log = grid3.run(config)
+    //val log = grid3.run(RunConfiguration(Nil, Some("DaisyChain"), true))
+    assert(log.isEmpty)
+  }
+
+  test("SelfContainedDeviceWithBattery") {
+    val config: RunConfiguration = RunConfiguration(tickInterval = Hours(1), log = Set())
+    //val config: RunConfiguration = RunConfiguration(tickInterval = Hours(1), trace = ReportSelection.all, log = Set())
+    val log = grid8.run(config)
     assert(log.isEmpty)
   }
 
