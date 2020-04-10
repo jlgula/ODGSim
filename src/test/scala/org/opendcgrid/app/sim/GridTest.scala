@@ -32,7 +32,11 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     val grid = new Grid(Set(device4))
     val log = grid.run()
     assert(log.size == Parameters.maxTicks)
-    //assert(log.head == UnderPowerLogItem(Seconds(0), device4.deviceID, internalConsumption30, internalProduction20))
+    for (tick <- 0 until Parameters.maxTicks) {
+      val item = log(tick)
+      val time = tick * Parameters.tickInterval
+      assert(item == UnderPowerLogItem(time, device4.deviceID, internalConsumption30, Watts(0)))
+    }
   }
 
   test("BasicSourceAndLoad") {

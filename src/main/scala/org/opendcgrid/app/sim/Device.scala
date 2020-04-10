@@ -1,6 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Energy, Power, WattHours, Watts}
+import squants.energy.{Energy, Power, Watts}
 import squants.time.Time
 
 import scala.collection.mutable
@@ -17,6 +17,16 @@ trait Device {
 }
 
 trait MutableDevice extends Device {
+  def on: Boolean
+
+  def on_=(value: Boolean)
+
+  // Power currently being consumed.
+  def consumption: Power
+
+  // Power currently being produced.
+  def production: Power
+
   // Generate power requests and grants on various ports
   def assignPower(): Seq[PowerMessage]
 
@@ -38,6 +48,8 @@ trait MutableDevice extends Device {
   // Current charge of the battery, if any
   def batteryCharge: Energy
 
+  def batteryCharge_=(value: Energy)
+
   // Change the consumption or production state.
   def updateState(consumption: Power = Watts(0), production: Power = Watts(0))
 
@@ -52,6 +64,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
   def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery)
 
   class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power, val battery: Battery) extends MutableDevice {
+    var on: Boolean = true
     var batteryCharge: Energy = battery.initialCharge
     var consumption: Power = internalConsumption
     var production: Power = internalProduction
@@ -67,23 +80,6 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     // It can also be called after other events such as consumption/production change events.
     // These may have a 0 interval.
     def updatePowerState(timeDelta: Time, links: Map[Port, Port]): Unit = {
-      // Figure out the net power flow for this period
-      val netPowerFlow = netPortPowerFlow + production - assignedInternalConsumption
-      var batteryFlow = Watts(0)
-
-      // If the net power flow is positive, the battery must be charging at a rate up to its max charge rate.
-      // Otherwise, it must be discharging up to its max discharge rate.
-      if (netPowerFlow >= Watts(0)) {
-        batteryFlow = battery.chargeRate.min(netPowerFlow)
-      } else {
-        batteryFlow = -battery.dischargeRate.min(-netPowerFlow)
-      }
-
-      // Update the battery for this interval, constrained between 0 and capacity.
-      batteryCharge += timeDelta * batteryFlow
-      if (batteryCharge < WattHours(0)) batteryCharge = WattHours(0)
-      if (batteryCharge > battery.capacity) batteryCharge = battery.capacity
-
       // Assign port directions and validate legal configuration.
       for (sourcePort <- links.keys.filter(ports.contains(_))) {
         sourcePort match {
@@ -100,7 +96,6 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
           case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Load)
         }
       }
-
     }
 
     // Called in grid assign power loop to identify devices that need to be processed.
