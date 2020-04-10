@@ -7,7 +7,7 @@ object Parameters {
   val maxEvents = 1000 // Maximum number of events processed by Grid.run
   val maxPowerIterations = 1000 // Maximum number of passes through the assign power loop.
   val maxEnergyIterations = 1000 // Maximum number of passes through energy assignment.
-  val maxTicks = 10 // Number of tick events to process
+  val tickCount = 10 // Number of tick events to process
   val tickInterval: Time = Seconds(1)
 
 }
@@ -61,4 +61,6 @@ case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
 case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
-case class RunConfiguration(toDo: Seq[Event] = Nil, name: Option[String] = None, trace: Boolean = false)
+
+// Structure defines characteristics of a simulation run.
+case class RunConfiguration(toDo: Seq[Event] = Nil, name: Option[String] = None, trace: Boolean = false, tickCount: Int = Parameters.tickCount, tickInterval: Time = Parameters.tickInterval)

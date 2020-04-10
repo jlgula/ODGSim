@@ -1,9 +1,7 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Energy, WattHours, Watts}
+import squants.energy.{Energy, Watts}
 import squants.time.{Seconds, Time}
-import squants.energy.EnergyConversions.EnergyNumeric
-import squants.energy.PowerConversions.PowerNumeric
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -43,7 +41,7 @@ class Grid(
 
     var timeOffset: Time = Seconds(0) // Time since start of run
     var timeDelta: Time = Seconds(0) // Time since last event
-    val ticks = (1 until Parameters.maxTicks).map(Seconds(_)).map(TickEvent)
+    val ticks = (1 until configuration.tickCount).map(_ * configuration.tickInterval).map(TickEvent)
     val events = mutable.PriorityQueue[Event](configuration.toDo ++ ticks: _*)(Ordering.by { t: Event => t.time }).reverse
     val log = ArrayBuffer[LogItem]()
     var eventCount: Int = 0

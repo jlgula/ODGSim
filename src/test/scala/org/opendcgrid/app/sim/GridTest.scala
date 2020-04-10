@@ -31,8 +31,8 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
   test("SelfContainedDeviceWithoutEnoughPower") {
     val grid = new Grid(Set(device4))
     val log = grid.run()
-    assert(log.size == Parameters.maxTicks)
-    for (tick <- 0 until Parameters.maxTicks) {
+    assert(log.size == Parameters.tickCount)
+    for (tick <- 0 until Parameters.tickCount) {
       val item = log(tick)
       val time = tick * Parameters.tickInterval
       assert(item == UnderPowerLogItem(time, device4.deviceID, internalConsumption30, Watts(0)))
