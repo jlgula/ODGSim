@@ -1,7 +1,9 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Energy, Power, Watts}
+import squants.energy.{Energy, Power, WattHours, Watts}
 import squants.time.Time
+import squants.energy.EnergyConversions.EnergyNumeric
+import squants.energy.PowerConversions.PowerNumeric
 
 import scala.collection.mutable
 
@@ -55,6 +57,10 @@ trait MutableDevice extends Device {
 
   // Display the current power flow for a port
   def portPower(port: Port): Power
+
+  // Compute the energy needed by each load port.
+  def processDeviceEnergy(timeDelta: Time, portsWithEnergy: Map[Port, Energy]): Seq[(Port, Energy)]
+
 }
 
 // Battery Policy
@@ -98,6 +104,50 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       }
     }
 
+    // Compute the energy needed by each load port.
+    def processDeviceEnergy(timeDelta: Time, portsWithEnergy: Map[Port, Energy]): Seq[(Port, Energy)] = {
+      val sourcePorts = ports.filter(portPower(_) < Watts(0))
+      val loadPorts = ports.filter(portPower(_) > Watts(0))
+      val outboundEnergy = sourcePorts.collect(portsWithEnergy).sum
+      val batteryEnergyAvailable: Energy = batteryCharge
+      val productionEnergy: Energy = production * timeDelta
+      val maximumInboundEnergy: Energy = timeDelta * loadPorts.map(portPower).sum
+      val maximumAvailableEnergy: Energy = maximumInboundEnergy + productionEnergy + batteryEnergyAvailable - outboundEnergy
+      val consumptionEnergyRequired: Energy = consumption * timeDelta
+      on = consumptionEnergyRequired <= maximumAvailableEnergy
+      val consumedAndOutbound = outboundEnergy + (if (on) consumptionEnergyRequired else WattHours(0))
+      var chargeDelta: Energy = WattHours(0)
+      var inboundEnergyNeeded: Energy = WattHours(0)
+      if (consumedAndOutbound < maximumInboundEnergy + productionEnergy) {
+        // Energy available to charge battery.
+        val batteryEnergyNeeded: Energy = (battery.capacity - batteryCharge).min(battery.chargeRate * timeDelta)
+        val batteryEnergyAvailable = maximumInboundEnergy + productionEnergy - consumedAndOutbound
+        chargeDelta = batteryEnergyAvailable.min(batteryEnergyNeeded)
+        assert(chargeDelta >= WattHours(0))
+        inboundEnergyNeeded = chargeDelta + consumedAndOutbound - productionEnergy
+      } else {
+        // Must be discharging battery or 0.
+        val dischargeEnergy = consumedAndOutbound - (maximumInboundEnergy + productionEnergy)
+        assert(dischargeEnergy >= WattHours(0))
+        assert(dischargeEnergy <= battery.dischargeRate * timeDelta)
+        chargeDelta = -dischargeEnergy
+        inboundEnergyNeeded = consumedAndOutbound - (productionEnergy + dischargeEnergy)
+        assert(inboundEnergyNeeded <= maximumInboundEnergy)
+      }
+      batteryCharge += chargeDelta
+
+      // Allocate inbound energy
+      // Allocate energy received from attached devices to those devices.
+      // Allocation is in proportion to the granted values.
+      val totalGrantedPower = loadPorts.map(portPower).sum
+      assert(totalGrantedPower >= Watts(0))
+      if (totalGrantedPower > Watts(0)) {
+        val portFractions = loadPorts.map(portPower(_).toWatts / totalGrantedPower.toWatts)
+        val portEnergy = portFractions.map(_ * inboundEnergyNeeded)
+        loadPorts.zip(portEnergy)
+      } else Nil
+    }
+
     // Called in grid assign power loop to identify devices that need to be processed.
     def needsPower: Boolean = (consumption > Watts(0)) || batteryCharge < battery.capacity
 
@@ -115,7 +165,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
     def portPower(port: Port): Power = this.powerFlow(port)
 
     // The sum of all incoming port power minus all outgoing port power.
-    private def netPortPowerFlow: Power = powerFlow.values.fold(Watts(0))((a, b) => a + b)
+    private def netPortPowerFlow: Power = powerFlow.values.sum
 
     // The power available from the battery is the charge divided by the tick interval up to the maximum discharge rate.
     // This potentially understates the battery power as it assumes for for full tick but establishes a lower bound.
@@ -153,7 +203,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port], val
       }
 
       // Reject any remaining requests
-      val unfulfilledRequestPower = requests.map(_.power).fold(Watts(0))((a, b) => a + b)
+      val unfulfilledRequestPower = requests.map(_.power).sum
       while (requests.nonEmpty) {
         val nextRequest = requests.dequeue()
         result += PowerGrant(nextRequest.port, Watts(0))

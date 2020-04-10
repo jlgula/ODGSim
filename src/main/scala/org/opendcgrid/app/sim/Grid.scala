@@ -140,64 +140,12 @@ class Grid(
       var remainingDevices = ArrayBuffer(mutableDevices.toSeq: _*)
       var primedDevices: ArrayBuffer[MutableDevice] = ArrayBuffer[MutableDevice]()
 
-      def processDeviceEnergy(device: MutableDevice): Unit = {
-        val sourcePorts = device.ports.filter(isSourcePort(device, _))
-        val loadPorts = device.ports.filterNot(isSourcePort(device, _))
-        val outboundEnergy = sourcePorts.collect(portsWithEnergy).sum
-        val batteryEnergyAvailable: Energy = device.batteryCharge
-        val productionEnergy: Energy = device.production * timeDelta
-        val maximumInboundEnergy: Energy = timeDelta * loadPorts.map(device.portPower).sum
-        val maximumAvailableEnergy: Energy = maximumInboundEnergy + productionEnergy + batteryEnergyAvailable - outboundEnergy
-        val consumptionEnergyRequired: Energy = device.consumption * timeDelta
-        device.on = consumptionEnergyRequired <= maximumAvailableEnergy
-        val consumedAndOutbound = outboundEnergy + (if (device.on) consumptionEnergyRequired else WattHours(0))
-        var chargeDelta: Energy = WattHours(0)
-        var inboundEnergyNeeded: Energy = WattHours(0)
-        if (consumedAndOutbound < maximumInboundEnergy + productionEnergy) {
-          // Energy available to charge battery.
-          val batteryEnergyNeeded: Energy = batteryChargeEnergy(device)
-          val batteryEnergyAvailable = maximumInboundEnergy + productionEnergy - consumedAndOutbound
-          chargeDelta = batteryEnergyAvailable.min(batteryEnergyNeeded)
-          assert(chargeDelta >= WattHours(0))
-          inboundEnergyNeeded = chargeDelta + consumedAndOutbound - productionEnergy
-        } else {
-          // Must be discharging battery or 0.
-          val dischargeEnergy = consumedAndOutbound - (maximumInboundEnergy + productionEnergy)
-          assert(dischargeEnergy >= WattHours(0))
-          assert(dischargeEnergy <= device.battery.dischargeRate * timeDelta)
-          chargeDelta = -dischargeEnergy
-          inboundEnergyNeeded = consumedAndOutbound - (productionEnergy + dischargeEnergy)
-          assert(inboundEnergyNeeded <= maximumInboundEnergy)
-        }
-        device.batteryCharge += chargeDelta
-        allocateInboundEnergy(device, inboundEnergyNeeded)
-      }
-
-      // Allocate energy received from attached devices to those devices.
-      // Allocation is in proportion to the granted values.
-      def allocateInboundEnergy(device: MutableDevice, energy: Energy): Unit = {
-        val loadPorts = device.ports.filter(isLoadPort(device, _))
-        val totalGrantedPower = loadPorts.map(device.portPower).sum
-        assert(totalGrantedPower >= Watts(0))
-        if (totalGrantedPower > Watts(0)) {
-          val portFractions = loadPorts.map(device.portPower(_).toWatts / totalGrantedPower.toWatts)
-          val portEnergy = portFractions.map(_ * energy)
-          val mappedLoadPorts: Seq[Port] = loadPorts.map(getLinkPort(_).get)
-          val pairs = mappedLoadPorts.zip(portEnergy)
-          portsWithEnergy ++= pairs
-        }
-      }
-
       def isSourcePort(device: MutableDevice, port: Port): Boolean = device.portPower(port) < Watts(0)
-
-      def isLoadPort(device: MutableDevice, port: Port): Boolean = device.portPower(port) > Watts(0)
 
       def isPrimedDevice(device: MutableDevice): Boolean = {
         val sourcePorts = device.ports.filter(isSourcePort(device, _))
         sourcePorts.forall(portsWithEnergy.contains)
       }
-
-      def batteryChargeEnergy(device: MutableDevice): Energy = (device.battery.capacity - device.batteryCharge).min(device.battery.chargeRate * timeDelta)
 
       var iteration = 0
       while (remainingDevices.nonEmpty) {
@@ -206,11 +154,13 @@ class Grid(
         val (primed: mutable.ArrayBuffer[MutableDevice], remaining) = remainingDevices.partition(isPrimedDevice)
         primedDevices = primed
         remainingDevices = remaining
-        primedDevices.foreach(processDeviceEnergy)
-
+        for (device <- primedDevices) {
+          val loadPortsWithDemand = device.processDeviceEnergy(timeDelta, portsWithEnergy.toMap)
+          val mappedPortsWithDemand = loadPortsWithDemand.map { case (port, energy) => (getLinkPort(port).get, energy) }
+          portsWithEnergy ++= mappedPortsWithDemand
+        }
       }
     }
-
 
     configuration.name.foreach(println) // Use for tracing particular tests
 
