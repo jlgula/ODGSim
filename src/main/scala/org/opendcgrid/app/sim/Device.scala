@@ -1,7 +1,7 @@
 package org.opendcgrid.app.sim
 
 import squants.energy.{Energy, Power, WattHours, Watts}
-import squants.time.Time
+import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
 
@@ -30,8 +30,9 @@ trait MutableDevice extends Device {
   // Power currently being produced.
   def production: Power
 
-  // Generate power requests and grants on various ports
-  def assignPower(): Seq[PowerMessage]
+  // Generate power requests and grants on various ports.
+  // The tick interval determines how much battery power is available to allocate (charge/tick).
+  def assignPower(tickInterval: Time): Seq[PowerMessage]
 
   // Add a message to the input message queue.
   def postMessage(message: PowerMessage): Unit
@@ -62,6 +63,9 @@ trait MutableDevice extends Device {
   // Compute the energy needed by each load port.
   def processDeviceEnergy(timeDelta: Time, portsWithEnergy: Map[Port, Energy]): Seq[(Port, Energy)]
 
+  // Called at the end of the power assignment cycle for devices that do not have the power they need.
+  // Tells the device it should renegotiate at the next message cycle.
+  def renegotiatePowerAssignments(): Unit
 }
 
 // Battery Policy
@@ -135,6 +139,7 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Ni
         inboundEnergyNeeded = consumedAndOutbound - (productionEnergy + dischargeEnergy)
         assert(inboundEnergyNeeded <= maximumInboundEnergy)
       }
+      assert(batteryCharge + chargeDelta >= WattHours(0))
       batteryCharge += chargeDelta
 
       // Allocate inbound energy
@@ -170,26 +175,32 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Ni
 
     // The power available from the battery is the charge divided by the tick interval up to the maximum discharge rate.
     // This potentially understates the battery power as it assumes for for full tick but establishes a lower bound.
-    private def batteryPowerAvailable: Power = battery.dischargeRate.min(batteryCharge / Parameters.tickInterval)
+    private def batteryPowerAvailable(tickInterval: Time): Power = if (tickInterval == Seconds(0)) Watts(0) else battery.dischargeRate.min(batteryCharge / tickInterval)
 
     // Process all pending messages and set the port state for all ports.
-    def assignPower(): Seq[PowerMessage] = {
+    def assignPower(tickInterval: Time): Seq[PowerMessage] = {
       val result: mutable.ArrayBuffer[PowerMessage] = mutable.ArrayBuffer[PowerMessage]()
 
       // First figure out how much power is needed from external sources if any and request that from available source ports or internal production.
       val powerRequests = pendingMessages.dequeueAll(_.isInstanceOf[PowerRequest])
       val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
+      assert(pendingMessages.isEmpty)
+
+      // Reset all outgoing ports with requests since we are going to redo them.
+      powerRequests.foreach { r: PowerMessage => {
+        this.powerFlow.update(r.port, Watts(0))
+      }
+      }
 
       // Record power incoming via load ports.
       powerGrants.foreach { r: PowerMessage => {
         this.powerFlow.update(r.port, r.power)
       }
       }
-      assert(pendingMessages.isEmpty)
 
       // Deal with internal consumption first.
       // Consumption is all or nothing. Either there is enough for all consumption or none is assigned.
-      var powerAvailable = netPortPowerFlow + production + batteryPowerAvailable
+      var powerAvailable = netPortPowerFlow + production + batteryPowerAvailable(tickInterval)
       assignedInternalConsumption = if (powerAvailable >= consumption) consumption else Watts(0)
       powerAvailable -= assignedInternalConsumption
 
@@ -197,18 +208,25 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Ni
       val requests = mutable.Queue[PowerMessage](powerRequests: _*)
       while (requests.nonEmpty && powerAvailable > Watts(0)) {
         val nextRequest = requests.dequeue()
+        // Grant the sum of available power and what's already been granted. Note portPower will be negative.
         val powerGranted = nextRequest.power.min(powerAvailable)
         result += PowerGrant(nextRequest.port, powerGranted)
         powerAvailable -= powerGranted
         this.powerFlow.update(nextRequest.port, -powerGranted)
       }
 
-      // Reject any remaining requests
+      // Reject any remaining requests from ports that have not yet been addressed.
       val unfulfilledRequestPower = requests.map(_.power).sum
       while (requests.nonEmpty) {
         val nextRequest = requests.dequeue()
-        result += PowerGrant(nextRequest.port, Watts(0))
-        this.powerFlow.update(nextRequest.port, Watts(0))
+        // It is possible for multiple requests to come through one port.
+        // If we respond to the first one, ignore subsequent requests and do not reject.
+        // Only respond to requests for ports that have not yet been assigned.
+        if (portPower(nextRequest.port) == Watts(0)) {
+          result += PowerGrant(nextRequest.port, Watts(0))
+        }
+        //result += PowerGrant(nextRequest.port, Watts(0))
+        //this.powerFlow.update(nextRequest.port, Watts(0))
       }
 
       // The power we would like to have from other sources is the sum of our unfulfilled requests
@@ -216,13 +234,17 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Ni
       // The battery needs the min of its charge rate and the amount that would fill it in the tick interval.
       // We only want to request from ports that have not already granted power.
       val consumptionPowerNeeded = consumption - assignedInternalConsumption
-      val batteryPowerNeeded = battery.chargeRate.min((battery.capacity - batteryCharge) / Parameters.tickInterval)
+      val batteryPowerNeeded = if (tickInterval == Seconds(0)) Watts(0) else battery.chargeRate.min((battery.capacity - batteryCharge) / tickInterval)
       val totalPowerNeeded = unfulfilledRequestPower + consumptionPowerNeeded + batteryPowerNeeded - netPortPowerFlow
       if (totalPowerNeeded > Watts(0)) {
         result ++= allLoadPorts.filter(portPower(_) == Watts(0)).map(PowerRequest(_, totalPowerNeeded))
       }
 
       result
+    }
+
+    def renegotiatePowerAssignments(): Unit = ports.filter(portPower(_) > Watts(0)).foreach {
+      powerFlow.update(_, Watts(0))
     }
 
     def allLoadPorts: collection.Set[Port] = portDirections.filter(p => p._2 == Direction.Load).keySet

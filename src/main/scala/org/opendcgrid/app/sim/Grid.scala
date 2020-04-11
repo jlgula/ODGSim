@@ -57,7 +57,7 @@ class Grid(
         _.needsPower
       }
       devicesToProcess.foreach {
-        assignPowerAndProcessMessages
+        assignPowerAndProcessMessages(_, timeDelta)
       }
 
       // Then try to resolve all messages.
@@ -66,7 +66,7 @@ class Grid(
           _.hasMessagesToProcess
         }
         devicesToProcess.foreach {
-          assignPowerAndProcessMessages
+          assignPowerAndProcessMessages(_, timeDelta)
         }
         powerIteration += 1
         if (powerIteration >= Parameters.maxPowerIterations) fatal("Too many power iterations")
@@ -82,8 +82,8 @@ class Grid(
       }
     }
 
-    def assignPowerAndProcessMessages(device: MutableDevice): Unit = {
-      val messages = device.assignPower()
+    def assignPowerAndProcessMessages(device: MutableDevice, timeDelta: Time): Unit = {
+      val messages = device.assignPower(timeDelta)
       for (message <- messages) {
         // If there is something attached to the port, forward to remote device.
         assert(getLinkPort(message.port).isDefined) // Device should not send messages on unattached ports
@@ -130,6 +130,8 @@ class Grid(
           portsWithEnergy ++= mappedPortsWithDemand
         }
       }
+
+      mutableDevices.filterNot(_.on).foreach(_.renegotiatePowerAssignments())
     }
 
     def report(selection: ReportSelection, item: LogItem): Unit = {

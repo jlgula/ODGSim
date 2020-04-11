@@ -80,7 +80,13 @@ object Samples {
   val deviceUUID12 = 12
   val device12 = new BasicDevice("device12", deviceUUID12, internalConsumption = Watts(20), internalProduction = Watts(10), battery = battery01)
 
-  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12)
+  // Pass through device with a battery.
+  val deviceUUID13 = 13
+  val port130: Port = Port(deviceUUID13, "port130", Direction.Load)
+  val port131: Port = Port(deviceUUID13, "port131", Direction.Source)
+  val device13 = new BasicDevice("device13", deviceUUID13, ports = Seq(port130, port131), battery = battery01)
+
+  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13)
 
   val grid2 = new Grid(Set(device1, device5), Map(port50 -> port10)) // Basic load and source
 
@@ -101,4 +107,8 @@ object Samples {
 
   // Minimal self-contained device with battery.
   val grid8 = new Grid(Set(device12))
+
+  // Daisy chain with 10W source, with battery and 30W load.
+  val grid9 = new Grid(Set(device13, device7, device8), Map(port80 -> port130, port131 -> port70))
+
 }

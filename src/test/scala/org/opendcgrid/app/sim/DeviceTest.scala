@@ -30,7 +30,7 @@ class DeviceTest extends org.scalatest.funsuite.AnyFunSuite {
     for (device <- allDevices.map(_.buildMutableDevice())) {
       //device.reset()
       device.updatePowerState(Seconds(0), Map[Port, Port]())
-      val _ = device.assignPower()
+      val _ = device.assignPower(Parameters.tickInterval)
     }
   }
   /*
