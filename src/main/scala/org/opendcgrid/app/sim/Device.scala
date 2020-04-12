@@ -200,9 +200,21 @@ class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Ni
 
       // Deal with internal consumption first.
       // Consumption is all or nothing. Either there is enough for all consumption or none is assigned.
-      var powerAvailable = netPortPowerFlow + production + batteryPowerAvailable(tickInterval)
+      val inboundPower = ports.map(portPower).filter(_ > Watts(0)).sum
+      var powerAvailable = inboundPower + production + batteryPowerAvailable(tickInterval)
       assignedInternalConsumption = if (powerAvailable >= consumption) consumption else Watts(0)
       powerAvailable -= assignedInternalConsumption
+
+      // If there is not enough power to satisfy all the current grants,
+      // send a reject to each current grant port and zero out the port power.
+      val outBoundPorts = ports.filter(portPower(_) < Watts(0))
+      val outboundPower = -outBoundPorts.map(portPower).sum
+      if (powerAvailable < outboundPower) {
+        for (port <- outBoundPorts) {
+          result += PowerGrant(port, Watts(0))
+          powerFlow.update(port, Watts(0))
+        }
+      } else powerAvailable -= outboundPower
 
       // Now grant power for requests, first come, first served.
       val requests = mutable.Queue[PowerMessage](powerRequests: _*)
