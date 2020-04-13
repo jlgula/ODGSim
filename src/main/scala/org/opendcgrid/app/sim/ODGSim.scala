@@ -1,7 +1,8 @@
 package org.opendcgrid.app.sim
 
 import squants.time.{Seconds, Time}
-import squants.energy.{Energy, Power, WattHours, Watts}
+import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
+import squants.market.{Price, USD}
 
 object Parameters {
   val maxEvents = 1000 // Maximum number of events processed by Grid.run
@@ -9,7 +10,7 @@ object Parameters {
   val maxEnergyIterations = 1000 // Maximum number of passes through energy assignment.
   val tickCount = 10 // Number of tick events to process
   val tickInterval: Time = Seconds(1)
-
+  val powerPrice: Price[Energy] = USD(1) / KilowattHours(1)
 }
 
 object ODGSim extends App {
@@ -128,6 +129,8 @@ sealed abstract class PowerMessage(val port: Port, val power: Power)
 case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
 
 case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
+
+case class PowerPrice(pt: Port, pwr: Power, price: Price[Energy]) extends PowerMessage(pt, pwr)
 
 
 // Structure defines characteristics of a simulation run.

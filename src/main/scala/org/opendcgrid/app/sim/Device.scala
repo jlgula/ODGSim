@@ -4,6 +4,7 @@ import squants.energy.{Energy, Power, WattHours, Watts}
 import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
+import squants.market.Price
 
 import scala.collection.mutable
 
@@ -14,6 +15,7 @@ trait Device {
   val internalConsumption: Power
   val internalProduction: Power
   val battery: Battery
+  val initialPowerPrice: Price[Energy]
 
   def buildMutableDevice(): MutableDevice
 }
@@ -29,6 +31,9 @@ trait MutableDevice extends Device {
 
   // Power currently being produced.
   def production: Power
+
+  // The price at which the device is willing to buy or sell energy in $/kWh
+  def powerPrice: Price[Energy]
 
   // Generate power requests and grants on various ports.
   // The tick interval determines how much battery power is available to allocate (charge/tick).
@@ -71,16 +76,33 @@ trait MutableDevice extends Device {
 // Battery Policy
 // The device always tries to get enough power to charge its battery but it will use the battery to fulfill any existing demand.
 
-class BasicDevice(val deviceID: String, val uuid: Int, val ports: Seq[Port] = Nil, val internalConsumption: Power = Watts(0), val internalProduction: Power = Watts(0), val battery: Battery = NullBattery) extends Device {
-  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery)
+class BasicDevice(
+                   val deviceID: String,
+                   val uuid: Int,
+                   val ports: Seq[Port] = Nil,
+                   val internalConsumption: Power = Watts(0),
+                   val internalProduction: Power = Watts(0),
+                   val battery: Battery = NullBattery,
+                   val initialPowerPrice: Price[Energy] = Parameters.powerPrice) extends Device {
 
-  class BasicMutableDevice(val deviceID: String, val uuid: Int, override val ports: Seq[Port], val internalConsumption: Power, val internalProduction: Power, val battery: Battery) extends MutableDevice {
+  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery, initialPowerPrice)
+
+  class BasicMutableDevice(
+                            val deviceID: String,
+                            val uuid: Int,
+                            val ports: Seq[Port],
+                            val internalConsumption: Power,
+                            val internalProduction: Power,
+                            val battery: Battery,
+                            val initialPowerPrice: Price[Energy]) extends MutableDevice {
     var on: Boolean = true
     var batteryCharge: Energy = battery.initialCharge
     var consumption: Power = internalConsumption
     var production: Power = internalProduction
+    var powerPrice: Price[Energy] = initialPowerPrice
     val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power](ports.map((port: Port) => (port, Watts(0))): _*) // Current power flow by port. Positive is inbound, negative is outbound
     val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
+    val portPrices: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
     val pendingMessages: mutable.Queue[PowerMessage] = mutable.Queue[PowerMessage]() // Power demands from other devices to be processed.
 
