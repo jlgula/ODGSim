@@ -98,14 +98,24 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     assert(log.isEmpty)
   }
 
-    test("DaisyChainWithBattery") {
-      val config: RunConfiguration = RunConfiguration(tickInterval = Hours(0.5), log = Set(ReportSelection.DeviceStatus))
-      //val config: RunConfiguration = RunConfiguration(tickInterval = Hours(0.5), trace = ReportSelection.all, log = Set(ReportSelection.DeviceStatus))
-      val log = grid9.run(config)
-      val device7OnStatus = log.collect { case LogItem.Device(_, _, 7, _, _, _, on) => on }
-      assert(device7OnStatus.tail.contains(true))
-      //device7OnStatus.tail.foreach(println(_))
-    }
+  test("DaisyChainWithBattery") {
+    val config: RunConfiguration = RunConfiguration(tickInterval = Hours(0.5), log = Set(ReportSelection.DeviceStatus))
+    //val config: RunConfiguration = RunConfiguration(tickInterval = Hours(0.5), trace = ReportSelection.all, log = Set(ReportSelection.DeviceStatus))
+    val log = grid9.run(config)
+    val device7OnStatus = log.collect { case LogItem.Device(_, _, 7, _, _, _, on) => on }
+    assert(device7OnStatus.tail.contains(true))
+    //device7OnStatus.tail.foreach(println(_))
+  }
+
+  test("LoadsPrioritizedByPrice") {
+    val config: RunConfiguration = RunConfiguration(log = Set(ReportSelection.DeviceStatus))
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all, log = Set(ReportSelection.DeviceStatus))
+    val log = grid10.run(config)
+    val device1Status = log.collect { case LogItem.Device(_, _, 1, _, _, _, on) => on }
+    val device14Status = log.collect { case LogItem.Device(_, _, 14, _, _, _, on) => on }
+    assert(device1Status.forall(result => result)) // Device 1 should be always on.
+    assert(!device14Status.tail.exists(result => result)) // Device 14 stays off after initialization
+  }
 
 
 }

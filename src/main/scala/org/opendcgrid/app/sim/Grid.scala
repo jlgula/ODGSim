@@ -47,7 +47,7 @@ class Grid(
     var eventCount: Int = 0
 
     def assignPower(timeDelta: Time): Unit = {
-      mutableDevices.foreach { device: MutableDevice => device.updatePowerState(timeDelta, links) }
+      mutableDevices.foreach { device: MutableDevice => processMessages(device, device.initializePowerCycle(timeDelta, links)) }
       moveEnergy(timeDelta)
 
       var powerIteration = 0
@@ -84,15 +84,19 @@ class Grid(
 
     def assignPowerAndProcessMessages(device: MutableDevice, timeDelta: Time): Unit = {
       val messages = device.assignPower(timeDelta)
+      processMessages(device, messages)
+    }
+
+    def processMessages(device: MutableDevice, messages: Seq[Message]): Unit = {
       for (message <- messages) {
         // If there is something attached to the port, forward to remote device.
         assert(getLinkPort(message.port).isDefined) // Device should not send messages on unattached ports
         getLinkPort(message.port).foreach { remotePort: Port =>
           val remoteDevice = getDevice(remotePort)
-          val mappedMessage = mapMessage(message, remotePort)
+          val mappedMessage: Message = mapMessage(message, remotePort)
           remoteDevice.postMessage(mappedMessage)
           val sourceDevice = getDevice(message.port)
-          report(ReportSelection.PowerMessage, LogItem.Message(timeOffset, sourceDevice.uuid, remoteDevice.uuid, mappedMessage))
+          report(ReportSelection.Message, LogItem.MessageItem(timeOffset, sourceDevice.uuid, remoteDevice.uuid, mappedMessage))
         }
       }
     }
@@ -170,9 +174,10 @@ class Grid(
   }
 
 
-  def mapMessage(message: PowerMessage, targetPort: Port): PowerMessage = message match {
+  def mapMessage(message: Message, targetPort: Port): Message = message match {
     case p: PowerRequest => PowerRequest(targetPort, p.power)
     case p: PowerGrant => PowerGrant(targetPort, p.power)
+    case p: PowerPrice => PowerPrice(targetPort, p.price)
   }
 
   // Gets the device referenced by a port by matching uuid.

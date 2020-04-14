@@ -1,6 +1,6 @@
 package org.opendcgrid.app.sim
 
-import squants.energy.{Energy, Power, WattHours, Watts}
+import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
 import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
@@ -9,14 +9,18 @@ import squants.market.Price
 import scala.collection.mutable
 
 trait Device {
-  val deviceID: String
-  val uuid: Int
-  val ports: Seq[Port]
-  val internalConsumption: Power
-  val internalProduction: Power
-  val battery: Battery
-  val initialPowerPrice: Price[Energy]
+  val deviceID: String // String description for device
+  val uuid: Int // Unique ID for device, used in Ports
+  val ports: Seq[Port] // All ports on device
+  val internalConsumption: Power // Power consumed - default value
+  val internalProduction: Power // Power produced - default value
+  val battery: Battery // Energy storage, note: can be null ie 0 max charge
+  val initialPowerPrice: Price[Energy] // Default power price for device
+  val priceStep: Price[Energy] // Amount to raise or lower price to change demand
+  val priceMax: Price[Energy] // Maximum value of the power price.
 
+  // Generate a mutable device instance from this definition.
+  // Separating mutable from immutable permits static definitions that can be reused per run - test cases.
   def buildMutableDevice(): MutableDevice
 }
 
@@ -37,16 +41,16 @@ trait MutableDevice extends Device {
 
   // Generate power requests and grants on various ports.
   // The tick interval determines how much battery power is available to allocate (charge/tick).
-  def assignPower(tickInterval: Time): Seq[PowerMessage]
+  def assignPower(tickInterval: Time): Seq[Message]
 
   // Add a message to the input message queue.
-  def postMessage(message: PowerMessage): Unit
+  def postMessage(message: Message): Unit
 
   // True iff the input message queue is not empty
   def hasMessagesToProcess: Boolean
 
-  // This is called once after each event to initialize the data for this device
-  def updatePowerState(timeDelta: Time, links: Map[Port, Port]): Unit
+  // This is called once after each tick or event to prepare for a sequence of assignPower cycles.
+  def initializePowerCycle(timeDelta: Time, links: Map[Port, Port]): Seq[Message]
 
   // Called in grid assign power loop to identify devices that need to be processed.
   def needsPower: Boolean
@@ -83,9 +87,11 @@ class BasicDevice(
                    val internalConsumption: Power = Watts(0),
                    val internalProduction: Power = Watts(0),
                    val battery: Battery = NullBattery,
-                   val initialPowerPrice: Price[Energy] = Parameters.powerPrice) extends Device {
+                   val initialPowerPrice: Price[Energy] = Parameters.powerPrice,
+                   val priceStep: Price[Energy] = Parameters.priceStep,
+                   val priceMax: Price[Energy] = Parameters.priceMax) extends Device {
 
-  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery, initialPowerPrice)
+  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery, initialPowerPrice, priceStep, priceMax)
 
   class BasicMutableDevice(
                             val deviceID: String,
@@ -94,7 +100,9 @@ class BasicDevice(
                             val internalConsumption: Power,
                             val internalProduction: Power,
                             val battery: Battery,
-                            val initialPowerPrice: Price[Energy]) extends MutableDevice {
+                            val initialPowerPrice: Price[Energy],
+                            val priceStep: Price[Energy],
+                            val priceMax: Price[Energy]) extends MutableDevice {
     var on: Boolean = true
     var batteryCharge: Energy = battery.initialCharge
     var consumption: Power = internalConsumption
@@ -104,7 +112,7 @@ class BasicDevice(
     val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
     val portPrices: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
-    val pendingMessages: mutable.Queue[PowerMessage] = mutable.Queue[PowerMessage]() // Power demands from other devices to be processed.
+    val pendingMessages: mutable.Queue[Message] = mutable.Queue[Message]() // Power demands from other devices to be processed.
 
     def buildMutableDevice(): MutableDevice = this
 
@@ -112,7 +120,7 @@ class BasicDevice(
     // This is normally the tick interval and is used to update the state of the battery, if any.
     // It can also be called after other events such as consumption/production change events.
     // These may have a 0 interval.
-    def updatePowerState(timeDelta: Time, links: Map[Port, Port]): Unit = {
+    def initializePowerCycle(timeDelta: Time, links: Map[Port, Port]): Seq[Message] = {
       // Assign port directions and validate legal configuration.
       for (sourcePort <- links.keys.filter(ports.contains(_))) {
         sourcePort match {
@@ -129,6 +137,9 @@ class BasicDevice(
           case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Load)
         }
       }
+
+      // Send a price message to all source ports.
+      allSourcePorts.map(PowerPrice(_, this.powerPrice)).toSeq
     }
 
     // Compute the energy needed by each load port.
@@ -183,7 +194,7 @@ class BasicDevice(
     def hasMessagesToProcess: Boolean = pendingMessages.nonEmpty
 
     // Called to add a message to the message queue.
-    def postMessage(message: PowerMessage): Unit = pendingMessages += message
+    def postMessage(message: Message): Unit = pendingMessages += message
 
     // Called at the end of an assign power cycle to verify that the device has the power it needs.
     def validatePower(time: Time): Option[LogItem] = {
@@ -200,22 +211,26 @@ class BasicDevice(
     private def batteryPowerAvailable(tickInterval: Time): Power = if (tickInterval == Seconds(0)) Watts(0) else battery.dischargeRate.min(batteryCharge / tickInterval)
 
     // Process all pending messages and set the port state for all ports.
-    def assignPower(tickInterval: Time): Seq[PowerMessage] = {
-      val result: mutable.ArrayBuffer[PowerMessage] = mutable.ArrayBuffer[PowerMessage]()
+    def assignPower(tickInterval: Time): Seq[Message] = {
+      val result: mutable.ArrayBuffer[Message] = mutable.ArrayBuffer[Message]()
 
       // First figure out how much power is needed from external sources if any and request that from available source ports or internal production.
-      val powerRequests = pendingMessages.dequeueAll(_.isInstanceOf[PowerRequest])
-      val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant])
+      val powerRequests = pendingMessages.dequeueAll(_.isInstanceOf[PowerRequest]).collect { case m: PowerRequest => m }
+      val powerGrants = pendingMessages.dequeueAll(_.isInstanceOf[PowerGrant]).collect { case m: PowerGrant => m }
+      val prices = pendingMessages.dequeueAll(_.isInstanceOf[PowerPrice]).collect { case m: PowerPrice => m }
       assert(pendingMessages.isEmpty)
 
+      // Record prices for ports.
+      prices.foreach { pm => this.portPrices.update(pm.port, pm.price) }
+
       // Reset all outgoing ports with requests since we are going to redo them.
-      powerRequests.foreach { r: PowerMessage => {
+      powerRequests.foreach { r: Message => {
         this.powerFlow.update(r.port, Watts(0))
       }
       }
 
       // Record power incoming via load ports.
-      powerGrants.foreach { r: PowerMessage => {
+      powerGrants.foreach { r: PowerGrant => {
         this.powerFlow.update(r.port, r.power)
       }
       }
@@ -239,7 +254,7 @@ class BasicDevice(
       } else powerAvailable -= outboundPower
 
       // Now grant power for requests, first come, first served.
-      val requests = mutable.Queue[PowerMessage](powerRequests: _*)
+      val requests = mutable.Queue[PowerRequest](powerRequests: _*)
       while (requests.nonEmpty && powerAvailable > Watts(0)) {
         val nextRequest = requests.dequeue()
         // Grant the sum of available power and what's already been granted. Note portPower will be negative.
@@ -271,10 +286,18 @@ class BasicDevice(
       val batteryPowerNeeded = if (tickInterval == Seconds(0)) Watts(0) else battery.chargeRate.min((battery.capacity - batteryCharge) / tickInterval)
       val totalPowerNeeded = unfulfilledRequestPower + consumptionPowerNeeded + batteryPowerNeeded - netPortPowerFlow
       if (totalPowerNeeded > Watts(0)) {
-        result ++= allLoadPorts.filter(portPower(_) == Watts(0)).map(PowerRequest(_, totalPowerNeeded))
+        // Issue requests to ports that have not yet received a grant as defined by portPower is 0
+        // and is affordable relative to what I'm willing to pay.
+        result ++= allLoadPorts.filter(port => (portPower(port) == Watts(0)) && isPortAffordable(port)).map(PowerRequest(_, totalPowerNeeded))
       }
 
       result
+    }
+
+    // A port is affordable for sourcing power if its price is less than my price (interpreted as the price I'm willing to pay).
+    def isPortAffordable(port: Port): Boolean = {
+      val price = portPrices.getOrElse(port, throw new IllegalStateException(s"Device: ${this.toString}. No price on port $port"))
+      (price * KilowattHours(1)) <= (this.powerPrice * KilowattHours(1))
     }
 
     def renegotiatePowerAssignments(): Unit = ports.filter(portPower(_) > Watts(0)).foreach {

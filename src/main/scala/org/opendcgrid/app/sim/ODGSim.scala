@@ -4,6 +4,7 @@ import squants.time.{Seconds, Time}
 import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
 import squants.market.{Price, USD}
 
+// Default values for devices, grids and configurations. Most can be overridden in RunConfig or Device.
 object Parameters {
   val maxEvents = 1000 // Maximum number of events processed by Grid.run
   val maxPowerIterations = 1000 // Maximum number of passes through the assign power loop.
@@ -11,6 +12,8 @@ object Parameters {
   val tickCount = 10 // Number of tick events to process
   val tickInterval: Time = Seconds(1)
   val powerPrice: Price[Energy] = USD(1) / KilowattHours(1)
+  val priceStep: Price[Energy] = USD(1) / KilowattHours(1)
+  val priceMax: Price[Energy] = USD(1) / KilowattHours(1)
 }
 
 object ODGSim extends App {
@@ -59,7 +62,7 @@ object LogItemType {
 
   case object Port extends LogItemType("Port")
 
-  case object Message extends LogItemType("Message")
+  case object MessageItem extends LogItemType("Message")
 
   case object Configuration extends LogItemType("Configuration")
 
@@ -99,7 +102,7 @@ object LogItem {
     def detail = s"device: $device port: $port power: $power"
   }
 
-  case class Message(t: Time, source: Int, target: Int, message: PowerMessage) extends LogItem(t, LogItemType.Message) {
+  case class MessageItem(t: Time, source: Int, target: Int, message: Message) extends LogItem(t, LogItemType.MessageItem) {
     def detail = s"source: $source target: $target message: $message"
   }
 
@@ -117,20 +120,20 @@ object ReportSelection {
   case object ConfigurationName extends ReportSelection // Name of run configuration
   case object TickEvent extends ReportSelection // Timer ticks
   case object UpdateDeviceEvent extends ReportSelection // Events that change the state of the device
-  case object PowerMessage extends ReportSelection // Messages between devices
+  case object Message extends ReportSelection // Messages between devices
 
-  val all: Set[ReportSelection] = Set(UnderPower, SufficientPower, DeviceStatus, PortStatus, ConfigurationName, TickEvent, UpdateDeviceEvent, PowerMessage)
+  val all: Set[ReportSelection] = Set(UnderPower, SufficientPower, DeviceStatus, PortStatus, ConfigurationName, TickEvent, UpdateDeviceEvent, Message)
 
 }
 
 // Simulated network messages.
-sealed abstract class PowerMessage(val port: Port, val power: Power)
+sealed abstract class Message(val port: Port)
 
-case class PowerRequest(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
+case class PowerRequest(pt: Port, power: Power) extends Message(pt)
 
-case class PowerGrant(pt: Port, pwr: Power) extends PowerMessage(pt, pwr)
+case class PowerGrant(pt: Port, power: Power) extends Message(pt)
 
-case class PowerPrice(pt: Port, pwr: Power, price: Price[Energy]) extends PowerMessage(pt, pwr)
+case class PowerPrice(pt: Port, price: Price[Energy]) extends Message(pt)
 
 
 // Structure defines characteristics of a simulation run.

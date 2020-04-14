@@ -18,6 +18,7 @@ object Samples {
   val ports = Seq(port0, port1)
   val device0 = new BasicDevice(deviceName, deviceUUID, Seq())
 
+  // Basic load device with a 10W load.
   val deviceName1 = "testLoadDevice1"
   val deviceUUID1 = 1
   val port10: Port = Port(deviceUUID1, "loadPort10")
@@ -58,7 +59,7 @@ object Samples {
   val port80: Port = Port(deviceUUID8, "sourcePort80", Direction.Source)
   val device8 = new BasicDevice("device8", deviceUUID8, Seq(port80), internalProduction = internalProduction10)
 
-  // Source with 2 loads
+  // Source with 2 source ports to potentially support 2 loads.
   val deviceUUID9 = 9
   val port90: Port = Port(deviceUUID9, "sourcePort90", Direction.Source)
   val port91: Port = Port(deviceUUID9, "sourcePort91", Direction.Source)
@@ -86,7 +87,13 @@ object Samples {
   val port131: Port = Port(deviceUUID13, "port131", Direction.Source)
   val device13 = new BasicDevice("device13", deviceUUID13, ports = Seq(port130, port131), battery = battery01)
 
-  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13)
+  // Load with lower than normal price it's willing to pay.
+  val deviceUUID14 = 14
+  val port140: Port = Port(deviceUUID14, "port140", Direction.Load)
+  val device14 = new BasicDevice("device14", deviceUUID14, ports = Seq(port140), internalConsumption = internalConsumption10, initialPowerPrice = Parameters.powerPrice / 2)
+
+
+  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13, device14)
 
   val grid2 = new Grid(Set(device1, device5), Map(port50 -> port10)) // Basic load and source
 
@@ -110,5 +117,8 @@ object Samples {
 
   // Daisy chain with 10W source, with battery and 30W load.
   val grid9 = new Grid(Set(device13, device7, device8), Map(port80 -> port130, port131 -> port70))
+
+  // One source with 2 loads, one of which is prioritized off by price.
+  val grid10 = new Grid(Set(device1, device9, device14), Map(port90 -> port10, port91 -> port140))
 
 }
