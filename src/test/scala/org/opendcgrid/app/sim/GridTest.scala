@@ -40,14 +40,16 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
   }
 
   test("BasicSourceAndLoad") {
-    val log = grid2.run()
-    //val log = grid2.run(RunConfiguration(Nil, Some("BasicSourceAndLoad"), true))
+    val config: RunConfiguration = RunConfiguration()
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all)
+    val log = grid2.run(config)
     assert(log.isEmpty)
   }
 
   test("DaisyChain") {
-    val log = grid3.run()
-    //val log = grid3.run(RunConfiguration(Nil, Some("DaisyChain"), true))
+    val config: RunConfiguration = RunConfiguration()
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all)
+    val log = grid3.run(config)
     assert(log.isEmpty)
   }
 
@@ -107,7 +109,7 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     //device7OnStatus.tail.foreach(println(_))
   }
 
-  test("LoadsPrioritizedByPrice") {
+  test("TwoLoadsOneRefusesPrice") {
     val config: RunConfiguration = RunConfiguration(log = Set(ReportSelection.DeviceStatus))
     //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all, log = Set(ReportSelection.DeviceStatus))
     val log = grid10.run(config)
@@ -115,6 +117,16 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     val device14Status = log.collect { case LogItem.Device(_, _, 14, _, _, _, on) => on }
     assert(device1Status.forall(result => result)) // Device 1 should be always on.
     assert(!device14Status.tail.exists(result => result)) // Device 14 stays off after initialization
+  }
+
+  test("TwoLoadsOneOutBidsTheOther") {
+    val config: RunConfiguration = RunConfiguration(log = Set(ReportSelection.DeviceStatus))
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all, log = Set(ReportSelection.DeviceStatus))
+    val log = grid11.run(config)
+    val device1Status = log.collect { case LogItem.Device(_, _, 1, _, _, _, on) => on }
+    val device15Status = log.collect { case LogItem.Device(_, _, 15, _, _, _, on) => on }
+    assert(device15Status.forall(result => result)) // Device 1 should be always on.
+    assert(!device1Status.tail.exists(result => result)) // Device 14 stays off after initialization
   }
 
 

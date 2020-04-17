@@ -108,7 +108,7 @@ class BasicDevice(
     var consumption: Power = internalConsumption
     var production: Power = internalProduction
     var powerPrice: Price[Energy] = initialPowerPrice
-    val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power](ports.map((port: Port) => (port, Watts(0))): _*) // Current power flow by port. Positive is inbound, negative is outbound
+    val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
     val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
     val portPrices: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
@@ -139,7 +139,12 @@ class BasicDevice(
       }
 
       // Send a price message to all source ports.
-      allSourcePorts.map(PowerPrice(_, this.powerPrice)).toSeq
+      // This lets loads choose the lowest price source.
+      // Send a price message to all load ports.
+      // This lets sources select loads with the highest value.
+      //allSourcePorts.map(PowerPrice(_, this.powerPrice)).toSeq ++ allLoadPorts.map(PowerPrice(_, this.powerPrice)).toSeq
+      (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.powerPrice)).toSeq
+
     }
 
     // Compute the energy needed by each load port.
@@ -201,7 +206,10 @@ class BasicDevice(
       if (consumption > assignedInternalConsumption) Some(LogItem.UnderPower(time, deviceID, consumption, assignedInternalConsumption)) else None
     }
 
-    def portPower(port: Port): Power = this.powerFlow(port)
+    // Gets the power flowing through a port.
+    // This will be positive for load ports receiving power and negative for source ports supplying power.
+    // If a port is not in the powerFlow map, it reports 0.
+    def portPower(port: Port): Power = this.powerFlow.getOrElse(port, Watts(0))
 
     // The sum of all incoming port power minus all outgoing port power.
     private def netPortPowerFlow: Power = powerFlow.values.sum
@@ -211,6 +219,13 @@ class BasicDevice(
     private def batteryPowerAvailable(tickInterval: Time): Power = if (tickInterval == Seconds(0)) Watts(0) else battery.dischargeRate.min(batteryCharge / tickInterval)
 
     // Process all pending messages and set the port state for all ports.
+    // Try to satisfy any internal demand first then grant any left over power to source ports.
+    // If there is not enough power to satisfy internal demand or received requests, request power from load ports.
+    // With multiple requests, power is granted to the port whose load is offering the highest price.
+    // If multiple ports request offering the smae price, requests are granted first come, first served.
+    // Each time a new grant is received, all source ports are told to renegotiate via a price message.
+    // Price messages set the value of source ports and the cost of load ports.
+    // When received on a load port, they also trigger renegotiation on the port as the source's state has changed.
     def assignPower(tickInterval: Time): Seq[Message] = {
       val result: mutable.ArrayBuffer[Message] = mutable.ArrayBuffer[Message]()
 
@@ -221,7 +236,11 @@ class BasicDevice(
       assert(pendingMessages.isEmpty)
 
       // Record prices for ports.
-      prices.foreach { pm => this.portPrices.update(pm.port, pm.price) }
+      prices.foreach { pm =>
+        if (isLoadPort(pm.port)) powerFlow.remove(pm.port) // Force a renegotiation on port.
+        this.portPrices.update(pm.port, pm.price)
+      }
+
 
       // Reset all outgoing ports with requests since we are going to redo them.
       powerRequests.foreach { r: Message => {
@@ -231,6 +250,7 @@ class BasicDevice(
 
       // Record power incoming via load ports.
       powerGrants.foreach { r: PowerGrant => {
+        allSourcePorts.foreach(result += PowerPrice(_, this.powerPrice)) // Tell all source ports to renegotiate
         this.powerFlow.update(r.port, r.power)
       }
       }
@@ -253,8 +273,11 @@ class BasicDevice(
         }
       } else powerAvailable -= outboundPower
 
-      // Now grant power for requests, first come, first served.
-      val requests = mutable.Queue[PowerRequest](powerRequests: _*)
+      // Now grant power for requests in order of the price the port willing to pay.
+      assert(powerRequests.forall(pr => portPrices.contains(pr.port)))
+      val priceSortedRequests = powerRequests.sortBy(pr => portPrices(pr.port) * KilowattHours(1)).reverse
+      //val requests = mutable.Queue[PowerRequest](powerRequests: _*)
+      val requests = mutable.Queue[PowerRequest](priceSortedRequests: _*)
       while (requests.nonEmpty && powerAvailable > Watts(0)) {
         val nextRequest = requests.dequeue()
         // Grant the sum of available power and what's already been granted. Note portPower will be negative.
@@ -286,9 +309,9 @@ class BasicDevice(
       val batteryPowerNeeded = if (tickInterval == Seconds(0)) Watts(0) else battery.chargeRate.min((battery.capacity - batteryCharge) / tickInterval)
       val totalPowerNeeded = unfulfilledRequestPower + consumptionPowerNeeded + batteryPowerNeeded - netPortPowerFlow
       if (totalPowerNeeded > Watts(0)) {
-        // Issue requests to ports that have not yet received a grant as defined by portPower is 0
+        // Issue requests to ports that have not yet received a grant as defined by no entry in the power flow table.
         // and is affordable relative to what I'm willing to pay.
-        result ++= allLoadPorts.filter(port => (portPower(port) == Watts(0)) && isPortAffordable(port)).map(PowerRequest(_, totalPowerNeeded))
+        result ++= allLoadPorts.filter(port => (!powerFlow.isDefinedAt(port)) && isPortAffordable(port)).map(PowerRequest(_, totalPowerNeeded))
       }
 
       result
@@ -300,18 +323,28 @@ class BasicDevice(
       (price * KilowattHours(1)) <= (this.powerPrice * KilowattHours(1))
     }
 
-    def renegotiatePowerAssignments(): Unit = ports.filter(portPower(_) > Watts(0)).foreach {
-      powerFlow.update(_, Watts(0))
+    // This is called at the end of a cycle to tell devices they need to renegotiate power grants.
+    def renegotiatePowerAssignments(): Unit = allLoadPorts.foreach {
+      powerFlow.remove
     }
 
-    def allLoadPorts: collection.Set[Port] = portDirections.filter(p => p._2 == Direction.Load).keySet
-
-    def allSourcePorts: collection.Set[Port] = portDirections.filter(p => p._2 == Direction.Source).keySet
-
-    // Find the current value of all ports in a particular direction.
-    def filterPorts(direction: Direction): Seq[Port] = ports.filter {
-      portDirections(_) == direction
+    // True iff port is connected and configured to be a load, receiving power from a source.
+    def isLoadPort(port: Port): Boolean = portDirections.get(port) match {
+      case None => false
+      case Some(direction) => direction == Direction.Load
     }
+
+    // The set of all ports connected to a device and configured to be a load.
+    def allLoadPorts: collection.Set[Port] = ports.filter(isLoadPort).toSet
+
+    // True iff port is connected and configured to be a source, offering power to a load.
+    def isSourcePort(port: Port): Boolean = portDirections.get(port) match {
+      case None => false
+      case Some(direction) => direction == Direction.Source
+    }
+
+    // The set of all ports that are connected to another device and configured to be a source.
+    def allSourcePorts: collection.Set[Port] = ports.filter(isSourcePort).toSet
 
     def updateState(consumption: Power, production: Power): Unit = {
       this.consumption = consumption

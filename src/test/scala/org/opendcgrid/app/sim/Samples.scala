@@ -57,7 +57,8 @@ object Samples {
   // Lower power source device
   val deviceUUID8 = 8
   val port80: Port = Port(deviceUUID8, "sourcePort80", Direction.Source)
-  val device8 = new BasicDevice("device8", deviceUUID8, Seq(port80), internalProduction = internalProduction10)
+  val port81: Port = Port(deviceUUID8, "sourcePort81", Direction.Source)
+  val device8 = new BasicDevice("device8", deviceUUID8, Seq(port80, port81), internalProduction = internalProduction10)
 
   // Source with 2 source ports to potentially support 2 loads.
   val deviceUUID9 = 9
@@ -92,6 +93,11 @@ object Samples {
   val port140: Port = Port(deviceUUID14, "port140", Direction.Load)
   val device14 = new BasicDevice("device14", deviceUUID14, ports = Seq(port140), internalConsumption = internalConsumption10, initialPowerPrice = Parameters.powerPrice / 2)
 
+  // Load with higher than normal price it's willing to pay.
+  val deviceUUID15 = 15
+  val port150: Port = Port(deviceUUID15, "port150", Direction.Load)
+  val device15 = new BasicDevice("device15", deviceUUID15, ports = Seq(port150), internalConsumption = internalConsumption10, initialPowerPrice = Parameters.powerPrice * 2)
+
 
   val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13, device14)
 
@@ -120,5 +126,8 @@ object Samples {
 
   // One source with 2 loads, one of which is prioritized off by price.
   val grid10 = new Grid(Set(device1, device9, device14), Map(port90 -> port10, port91 -> port140))
+
+  // One source with 2 loads, one of which is willing to pay more so it should get priority.
+  val grid11 = new Grid(Set(device1, device8, device15), Map(port80 -> port10, port81 -> port150))
 
 }

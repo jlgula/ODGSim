@@ -87,7 +87,7 @@ object LogItem {
   }
 
   case class UnderPower(t: Time, device: String, expected: Power, assigned: Power) extends LogItem(t, LogItemType.Condition) {
-    def detail = s"under-power expected: $expected assigned: $assigned"
+    def detail = s"under-power device: $device, expected: $expected assigned: $assigned"
   }
 
   case class SufficientPower(t: Time, device: String, expected: Power, assigned: Power) extends LogItem(t, LogItemType.Condition) {
@@ -133,6 +133,8 @@ case class PowerRequest(pt: Port, power: Power) extends Message(pt)
 
 case class PowerGrant(pt: Port, power: Power) extends Message(pt)
 
+// On a source port, tells the connected device the price of power and also flags load to renegotiate.
+// From a load port, tells the source what the load is willing to pay for power.
 case class PowerPrice(pt: Port, price: Price[Energy]) extends Message(pt)
 
 
