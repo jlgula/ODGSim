@@ -18,10 +18,13 @@ trait Device {
   val initialPowerPrice: Price[Energy] // Default power price for device
   val priceStep: Price[Energy] // Amount to raise or lower price to change demand
   val priceMax: Price[Energy] // Maximum value of the power price.
+}
+
+trait DeviceBuilder {
 
   // Generate a mutable device instance from this definition.
   // Separating mutable from immutable permits static definitions that can be reused per run - test cases.
-  def buildMutableDevice(): MutableDevice
+  def buildMutableDevice(links: Map[Port, Port]): MutableDevice
 }
 
 trait MutableDevice extends Device {
@@ -50,7 +53,7 @@ trait MutableDevice extends Device {
   def hasMessagesToProcess: Boolean
 
   // This is called once after each tick or event to prepare for a sequence of assignPower cycles.
-  def initializePowerCycle(timeDelta: Time, links: Map[Port, Port]): Seq[Message]
+  def initializePowerCycle(timeDelta: Time): Seq[Message]
 
   // Called in grid assign power loop to identify devices that need to be processed.
   def needsPower: Boolean
@@ -89,9 +92,30 @@ class BasicDevice(
                    val battery: Battery = NullBattery,
                    val initialPowerPrice: Price[Energy] = Parameters.powerPrice,
                    val priceStep: Price[Energy] = Parameters.priceStep,
-                   val priceMax: Price[Energy] = Parameters.priceMax) extends Device {
+                   val priceMax: Price[Energy] = Parameters.priceMax) extends Device with DeviceBuilder {
 
-  def buildMutableDevice(): BasicMutableDevice = new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery, initialPowerPrice, priceStep, priceMax)
+  def buildMutableDevice(links: Map[Port, Port]): BasicMutableDevice = {
+    val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
+
+    // Assign port directions and validate legal configuration.
+    for (sourcePort <- links.keys.filter(ports.contains(_))) {
+      sourcePort match {
+        case p: Port if p.direction == Direction.Source => portDirections += (p -> Direction.Source)
+        case p: Port if p.direction == Direction.Load => throw new IllegalStateException(s"port $p is not a source")
+        case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Source)
+      }
+    }
+
+    for (destinationPort <- links.values.filter(ports.contains(_))) {
+      destinationPort match {
+        case p: Port if p.direction == Direction.Source => throw new IllegalStateException(s"port $p is not a load")
+        case p: Port if p.direction == Direction.Load => portDirections += (p -> Direction.Load)
+        case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Load)
+      }
+    }
+
+    new BasicMutableDevice(deviceID, uuid, ports, internalConsumption, internalProduction, battery, initialPowerPrice, priceStep, priceMax, portDirections.toMap)
+  }
 
   class BasicMutableDevice(
                             val deviceID: String,
@@ -102,49 +126,31 @@ class BasicDevice(
                             val battery: Battery,
                             val initialPowerPrice: Price[Energy],
                             val priceStep: Price[Energy],
-                            val priceMax: Price[Energy]) extends MutableDevice {
+                            val priceMax: Price[Energy],
+                            val directions: Map[Port, Direction]) extends MutableDevice {
     var on: Boolean = true
     var batteryCharge: Energy = battery.initialCharge
     var consumption: Power = internalConsumption
     var production: Power = internalProduction
     var powerPrice: Price[Energy] = initialPowerPrice
     val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
-    val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction]() // Direction of connected ports
+    val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction](directions.toSeq: _*) // Direction of connected ports
     val portPrices: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
     val pendingMessages: mutable.Queue[Message] = mutable.Queue[Message]() // Power demands from other devices to be processed.
 
-    def buildMutableDevice(): MutableDevice = this
+    def buildMutableDevice(links: Map[Port, Port]): MutableDevice = throw new IllegalStateException("Device is already mutable")
 
     // This is called once after each event to update the data for this device.
     // This is normally the tick interval and is used to update the state of the battery, if any.
     // It can also be called after other events such as consumption/production change events.
     // These may have a 0 interval.
-    def initializePowerCycle(timeDelta: Time, links: Map[Port, Port]): Seq[Message] = {
-      // Assign port directions and validate legal configuration.
-      for (sourcePort <- links.keys.filter(ports.contains(_))) {
-        sourcePort match {
-          case p: Port if p.direction == Direction.Source => portDirections += (p -> Direction.Source)
-          case p: Port if p.direction == Direction.Load => throw new IllegalStateException(s"port $p is not a source")
-          case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Source)
-        }
-      }
-
-      for (destinationPort <- links.values.filter(ports.contains(_))) {
-        destinationPort match {
-          case p: Port if p.direction == Direction.Source => throw new IllegalStateException(s"port $p is not a load")
-          case p: Port if p.direction == Direction.Load => portDirections += (p -> Direction.Load)
-          case p: Port if p.direction == Direction.Bidirectional => portDirections += (p -> Direction.Load)
-        }
-      }
-
+    def initializePowerCycle(timeDelta: Time): Seq[Message] = {
       // Send a price message to all source ports.
       // This lets loads choose the lowest price source.
       // Send a price message to all load ports.
       // This lets sources select loads with the highest value.
-      //allSourcePorts.map(PowerPrice(_, this.powerPrice)).toSeq ++ allLoadPorts.map(PowerPrice(_, this.powerPrice)).toSeq
       (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.powerPrice)).toSeq
-
     }
 
     // Compute the energy needed by each load port.

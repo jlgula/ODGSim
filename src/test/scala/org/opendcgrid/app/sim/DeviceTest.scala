@@ -14,9 +14,9 @@ class DeviceTest extends org.scalatest.funsuite.AnyFunSuite {
 
 
   test("initializePowerCycle") {
-    for (device <- Seq(device9.buildMutableDevice())) {
+    for (device <- Seq(device9.buildMutableDevice(Map()))) {
       //device.reset()
-      device.initializePowerCycle(Seconds(0), Map[Port, Port]())
+      device.initializePowerCycle(Seconds(0))
       assert(!device.hasMessagesToProcess)
       assertResult(Watts(0))(device.assignedInternalConsumption)
       //assertResult(device.internalConsumption)(device.totalPowerDemand)
@@ -27,9 +27,9 @@ class DeviceTest extends org.scalatest.funsuite.AnyFunSuite {
   }
 
   test("assignPower") {
-    for (device <- allDevices.map(_.buildMutableDevice())) {
+    for (device <- allDevices.map(_.buildMutableDevice(Map()))) {
       //device.reset()
-      device.initializePowerCycle(Seconds(0), Map[Port, Port]())
+      device.initializePowerCycle(Seconds(0))
       val _ = device.assignPower(Parameters.tickInterval)
     }
   }

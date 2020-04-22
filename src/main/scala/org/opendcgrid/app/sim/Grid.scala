@@ -30,12 +30,12 @@ import scala.collection.mutable.ArrayBuffer
   Any power that is produced but not consumed internally, stored in the battery or sent through ports is lost.
  */
 class Grid(
-            val devices: Set[Device] = Set(),
+            val devices: Set[DeviceBuilder] = Set(),
             val links: Map[Port, Port] = Map(),
             val configuredEvents: Seq[Event] = Seq()) {
 
   private val bidirectionalLinks = links ++ mutable.HashMap(links.toSeq.map { z: (Port, Port) => (z._2, z._1) }: _*)
-  private val mutableDevices: Set[MutableDevice] = devices.map(_.buildMutableDevice())
+  private val mutableDevices: Set[MutableDevice] = devices.map(_.buildMutableDevice(links))
 
   def run(configuration: RunConfiguration = RunConfiguration()): Seq[LogItem] = {
 
@@ -47,7 +47,7 @@ class Grid(
     var eventCount: Int = 0
 
     def assignPower(timeDelta: Time): Unit = {
-      mutableDevices.foreach { device: MutableDevice => processMessages(device, device.initializePowerCycle(timeDelta, links)) }
+      mutableDevices.foreach { device: MutableDevice => processMessages(device, device.initializePowerCycle(timeDelta)) }
       moveEnergy(timeDelta)
 
       var powerIteration = 0
