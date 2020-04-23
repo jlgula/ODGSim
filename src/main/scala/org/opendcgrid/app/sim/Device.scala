@@ -4,8 +4,7 @@ import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
 import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
-import squants.market.{Price, USD}
-
+import squants.market.Price
 import scala.collection.mutable
 
 trait Device {
@@ -135,11 +134,10 @@ class BasicDevice(
     var powerPrice: Price[Energy] = initialPowerPrice
     val powerFlow: mutable.HashMap[Port, Power] = mutable.HashMap[Port, Power]() // Current power flow by port. Positive is inbound, negative is outbound
     val portDirections: mutable.HashMap[Port, Direction] = mutable.HashMap[Port, Direction](directions.toSeq: _*) // Direction of connected ports
-    val portPrices: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
+    val portBuyPrice: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
+    val portSellPrice: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
     val pendingMessages: mutable.Queue[Message] = mutable.Queue[Message]() // Power demands from other devices to be processed.
-
-    def buildMutableDevice(links: Map[Port, Port]): MutableDevice = throw new IllegalStateException("Device is already mutable")
 
     // This is called once after each event to update the data for this device.
     // This is normally the tick interval and is used to update the state of the battery, if any.
@@ -247,11 +245,15 @@ class BasicDevice(
 
       // Record prices for ports.
       prices.foreach { pm =>
-        if (isLoadPort(pm.port)) powerFlow.remove(pm.port) // Force a renegotiation on port.
-        //this.portPrices.update(pm.port, pm.price)
+        if (isLoadPort(pm.port)) powerFlow.remove(pm.port) // Force a renegotiation on port.pm.price)
+
         portDirections(pm.port) match {
-          case Direction.Source => this.portPrices.update(pm.port, pm.buyPrice.getOrElse(USD(0) / KilowattHours(1)))
-          case Direction.Load => this.portPrices.update(pm.port, pm.sellPrice.getOrElse(Parameters.priceMax))
+          case Direction.Source => if (pm.buyPrice.isDefined) this.portBuyPrice.update(pm.port, pm.buyPrice.get) else {
+            this.portBuyPrice.remove(pm.port)
+          }
+          case Direction.Load => if (pm.sellPrice.isDefined) this.portSellPrice.update(pm.port, pm.sellPrice.get) else {
+            this.portSellPrice.remove(pm.port)
+          }
           case Direction.Bidirectional => throw new IllegalStateException("Bidirectional not supported yet")
         }
       }
@@ -289,9 +291,8 @@ class BasicDevice(
       } else powerAvailable -= outboundPower
 
       // Now grant power for requests in order of the price the port willing to pay.
-      assert(powerRequests.forall(pr => portPrices.contains(pr.port)))
-      val priceSortedRequests = powerRequests.sortBy(pr => portPrices(pr.port) * KilowattHours(1)).reverse
-      //val requests = mutable.Queue[PowerRequest](powerRequests: _*)
+      assert(powerRequests.forall(pr => portBuyPrice.contains(pr.port)))
+      val priceSortedRequests = powerRequests.sortBy(pr => portBuyPrice(pr.port) * KilowattHours(1)).reverse
       val requests = mutable.Queue[PowerRequest](priceSortedRequests: _*)
       while (requests.nonEmpty && powerAvailable > Watts(0)) {
         val nextRequest = requests.dequeue()
@@ -334,7 +335,7 @@ class BasicDevice(
 
     // A port is affordable for sourcing power if its price is less than my price (interpreted as the price I'm willing to pay).
     def isPortAffordable(port: Port): Boolean = {
-      val price = portPrices.getOrElse(port, throw new IllegalStateException(s"Device: ${this.toString}. No price on port $port"))
+      val price = portSellPrice.getOrElse(port, throw new IllegalStateException(s"Device: ${this.toString}. No price on port $port"))
       (price * KilowattHours(1)) <= (this.powerPrice * KilowattHours(1))
     }
 
