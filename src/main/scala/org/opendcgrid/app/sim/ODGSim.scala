@@ -133,9 +133,8 @@ case class PowerRequest(pt: Port, power: Power) extends Message(pt)
 
 case class PowerGrant(pt: Port, power: Power) extends Message(pt)
 
-// On a source port, tells the connected device the price of power and also flags load to renegotiate.
-// From a load port, tells the source what the load is willing to pay for power.
-case class PowerPrice(pt: Port, price: Price[Energy]) extends Message(pt)
+// Tells the connected device the price of power and also flags load to renegotiate.
+case class PowerPrice(pt: Port, buyPrice: Option[Price[Energy]], sellPrice: Option[Price[Energy]]) extends Message(pt)
 
 
 // Structure defines characteristics of a simulation run.

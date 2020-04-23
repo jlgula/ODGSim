@@ -4,7 +4,7 @@ import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
 import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
-import squants.market.Price
+import squants.market.{Price, USD}
 
 import scala.collection.mutable
 
@@ -150,7 +150,7 @@ class BasicDevice(
       // This lets loads choose the lowest price source.
       // Send a price message to all load ports.
       // This lets sources select loads with the highest value.
-      (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.powerPrice)).toSeq
+      (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.buyPrice, this.sellPrice)).toSeq
     }
 
     // Compute the energy needed by each load port.
@@ -224,6 +224,10 @@ class BasicDevice(
     // This potentially understates the battery power as it assumes for for full tick but establishes a lower bound.
     private def batteryPowerAvailable(tickInterval: Time): Power = if (tickInterval == Seconds(0)) Watts(0) else battery.dischargeRate.min(batteryCharge / tickInterval)
 
+    private def buyPrice: Option[Price[Energy]] = Some(this.powerPrice)
+
+    private def sellPrice: Option[Price[Energy]] = Some(this.powerPrice)
+
     // Process all pending messages and set the port state for all ports.
     // Try to satisfy any internal demand first then grant any left over power to source ports.
     // If there is not enough power to satisfy internal demand or received requests, request power from load ports.
@@ -244,7 +248,12 @@ class BasicDevice(
       // Record prices for ports.
       prices.foreach { pm =>
         if (isLoadPort(pm.port)) powerFlow.remove(pm.port) // Force a renegotiation on port.
-        this.portPrices.update(pm.port, pm.price)
+        //this.portPrices.update(pm.port, pm.price)
+        portDirections(pm.port) match {
+          case Direction.Source => this.portPrices.update(pm.port, pm.buyPrice.getOrElse(USD(0) / KilowattHours(1)))
+          case Direction.Load => this.portPrices.update(pm.port, pm.sellPrice.getOrElse(Parameters.priceMax))
+          case Direction.Bidirectional => throw new IllegalStateException("Bidirectional not supported yet")
+        }
       }
 
 
@@ -256,7 +265,7 @@ class BasicDevice(
 
       // Record power incoming via load ports.
       powerGrants.foreach { r: PowerGrant => {
-        allSourcePorts.foreach(result += PowerPrice(_, this.powerPrice)) // Tell all source ports to renegotiate
+        allSourcePorts.foreach(result += PowerPrice(_, this.buyPrice, this.sellPrice)) // Tell all source ports to renegotiate
         this.powerFlow.update(r.port, r.power)
       }
       }

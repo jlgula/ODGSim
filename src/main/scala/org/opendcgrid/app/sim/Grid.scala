@@ -164,8 +164,6 @@ class Grid(
           report(ReportSelection.UpdateDeviceEvent, LogItem.EventItem(next))
       }
 
-      //log += EventLogItem(next)
-      //if (configuration.trace) println(traceEvent(next))
       assignPower(timeDelta)
 
     }
@@ -175,9 +173,9 @@ class Grid(
 
 
   def mapMessage(message: Message, targetPort: Port): Message = message match {
-    case p: PowerRequest => PowerRequest(targetPort, p.power)
-    case p: PowerGrant => PowerGrant(targetPort, p.power)
-    case p: PowerPrice => PowerPrice(targetPort, p.price)
+    case p: PowerRequest => p.copy(pt = targetPort)
+    case p: PowerGrant => p.copy(pt = targetPort)
+    case p: PowerPrice => p.copy(pt = targetPort)
   }
 
   // Gets the device referenced by a port by matching uuid.
