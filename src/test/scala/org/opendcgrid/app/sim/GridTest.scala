@@ -129,5 +129,19 @@ class GridTest extends org.scalatest.funsuite.AnyFunSuite {
     assert(!device1Status.tail.exists(result => result)) // Device 14 stays off after initialization
   }
 
+  test("DaisyChainWithLowPrice") {
+    val config: RunConfiguration = RunConfiguration()
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all, name = Some("DaisyChainWithLowPrice"))
+    val log = grid12.run(config)
+    assert(log.isEmpty)
+  }
+
+  test("CombinerMergesPrices") {
+    val config: RunConfiguration = RunConfiguration()
+    //val config: RunConfiguration = RunConfiguration(trace = ReportSelection.all, name = Some("CombinerMergesPrices"))
+    val log = grid13.run(config)
+    assert(log.isEmpty)
+  }
+
 
 }

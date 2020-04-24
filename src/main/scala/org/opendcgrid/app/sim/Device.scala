@@ -4,7 +4,8 @@ import squants.energy.{Energy, KilowattHours, Power, WattHours, Watts}
 import squants.time.{Seconds, Time}
 import squants.energy.EnergyConversions.EnergyNumeric
 import squants.energy.PowerConversions.PowerNumeric
-import squants.market.Price
+import squants.market.{Price, USD}
+
 import scala.collection.mutable
 
 trait Device {
@@ -138,6 +139,7 @@ class BasicDevice(
     val portSellPrice: mutable.HashMap[Port, Price[Energy]] = mutable.HashMap[Port, Price[Energy]]()
     var assignedInternalConsumption: Power = Watts(0) // Power currently assigned to consumption, either the full consumption or none
     val pendingMessages: mutable.Queue[Message] = mutable.Queue[Message]() // Power demands from other devices to be processed.
+    private val zeroPrice: Price[Energy] = USD(0) / KilowattHours(1)
 
     // This is called once after each event to update the data for this device.
     // This is normally the tick interval and is used to update the state of the battery, if any.
@@ -148,7 +150,7 @@ class BasicDevice(
       // This lets loads choose the lowest price source.
       // Send a price message to all load ports.
       // This lets sources select loads with the highest value.
-      (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.buyPrice, this.sellPrice)).toSeq
+      (allSourcePorts ++ allLoadPorts).filterNot(powerFlow.contains).map(PowerPrice(_, this.buyPrice, this.sellPrice(timeDelta))).toSeq
     }
 
     // Compute the energy needed by each load port.
@@ -222,9 +224,31 @@ class BasicDevice(
     // This potentially understates the battery power as it assumes for for full tick but establishes a lower bound.
     private def batteryPowerAvailable(tickInterval: Time): Power = if (tickInterval == Seconds(0)) Watts(0) else battery.dischargeRate.min(batteryCharge / tickInterval)
 
-    private def buyPrice: Option[Price[Energy]] = Some(this.powerPrice)
+    private def buyPrice: Option[Price[Energy]] = {
+      if (this.consumption == Watts(0) && this.batteryCharge == battery.capacity && this.allLoadPorts.isEmpty) None
+      else Some(this.powerPrice)
+    }
 
-    private def sellPrice: Option[Price[Energy]] = Some(this.powerPrice)
+    // Compute the price for which this device is willing to sell power.
+    // This is a average of all available sources with their price weighted by their amount power.
+    // It needs the tick interval to figure out how much power the battery can supply.
+    // Battery power and local production are priced at the nominal device power price.
+    private def sellPrice(tickInterval: Time): Option[Price[Energy]] = {
+      if (this.production == Watts(0) && this.batteryCharge == KilowattHours(0) && this.allSourcePorts.isEmpty) None
+      else {
+        val availableLoadPorts = allLoadPorts.filter(portSellPrice.isDefinedAt).filter(powerFlow.isDefinedAt)
+        val portPower = availableLoadPorts.map(powerFlow(_)).sum
+        val batteryPower = this.batteryPowerAvailable(tickInterval)
+        val productionPower = production
+        val totalPower = portPower + batteryPower + productionPower
+        if (totalPower == Watts(0)) Some(zeroPrice) // Initial condition. No power offered yet.
+        else {
+          val localPrice = ((batteryPower + productionPower) / totalPower) * this.powerPrice
+          val portPrice = availableLoadPorts.map(port => (portSellPrice(port) * KilowattHours(1)) * (powerFlow(port) / totalPower)).fold(USD(0))(_ + _) / KilowattHours(1)
+          Some(localPrice + portPrice)
+        }
+      }
+    }
 
     // Process all pending messages and set the port state for all ports.
     // Try to satisfy any internal demand first then grant any left over power to source ports.
@@ -267,8 +291,9 @@ class BasicDevice(
 
       // Record power incoming via load ports.
       powerGrants.foreach { r: PowerGrant => {
-        allSourcePorts.foreach(result += PowerPrice(_, this.buyPrice, this.sellPrice)) // Tell all source ports to renegotiate
-        this.powerFlow.update(r.port, r.power)
+        //allSourcePorts.foreach(result += PowerPrice(_, this.buyPrice, this.sellPrice(tickInterval))) // Tell all source ports to renegotiate
+        this.powerFlow.update(r.port, r.power) // Update the flow first so powerflow will be available for sellPrice.
+        allSourcePorts.foreach(result += PowerPrice(_, this.buyPrice, this.sellPrice(tickInterval))) // Tell all source ports to renegotiate
       }
       }
 

@@ -98,8 +98,17 @@ object Samples {
   val port150: Port = Port(deviceUUID15, "port150", Direction.Load)
   val device15 = new BasicDevice("device15", deviceUUID15, ports = Seq(port150), internalConsumption = internalConsumption10, initialPowerPrice = Parameters.powerPrice * 2)
 
+  // Source with low price.
+  val deviceUUID16 = 16
+  val port160: Port = Port(deviceUUID16, "port160", Direction.Source)
+  val device16 = new BasicDevice("device16", deviceUUID16, Seq(port160), internalProduction = internalProduction20, initialPowerPrice = Parameters.powerPrice / 10)
 
-  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13, device14)
+  // Load with lower than normal price it's willing to pay and high power required.
+  val deviceUUID17 = 17
+  val port170: Port = Port(deviceUUID17, "port170", Direction.Load)
+  val device17 = new BasicDevice("device17", deviceUUID17, ports = Seq(port170), internalConsumption = internalConsumption30, initialPowerPrice = Parameters.powerPrice / 2)
+
+  val allDevices = Seq(device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11, device12, device13, device14, device15, device16, device17)
 
   val grid2 = new Grid(Set(device1, device5), Map(port50 -> port10)) // Basic load and source
 
@@ -129,5 +138,13 @@ object Samples {
 
   // One source with 2 loads, one of which is willing to pay more so it should get priority.
   val grid11 = new Grid(Set(device1, device8, device15), Map(port80 -> port10, port81 -> port150))
+
+  // Daisy chain with low sell price and low buy price.
+  // This verifies that the intermediate node is passing along the sell price.
+  val grid12 = new Grid(Set(device16, device14, device6), Map(port160 -> port61, port60 -> port140))
+
+  // Combiner with low aggregate sell price and low buy price.
+  // This verifies that the intermediate node is passing along the sell price merged from multiple sources.
+  val grid13 = new Grid(Set(device16, device8, device17, device10), Map(port160 -> port100, port80 -> port101, port102 -> port170))
 
 }
